@@ -26,14 +26,21 @@ export class WaveManager {
   state: WaveState = { wave: 0, enemiesLeft: 0, intermission: 3.5, bossActive: false, cleared: false, totalWaves: 5 };
   private spawnQueue: { cls: NpcClass; delay: number }[] = [];
   private spawnCursor = 0;
+  private groundSpawns: THREE.Vector3[] = [];
+  private allSpawns: THREE.Vector3[] = [];
 
   constructor(
-    private spawns: THREE.Vector3[],
+    spawns: THREE.Vector3[],
     private em: Emitter<GameEvents>,
     private onSpawn: (npc: Npc) => void,
     private onBossWave: () => void,
     private onAllCleared: () => void,
-  ) {}
+  ) {
+    this.allSpawns = spawns;
+    // 早期波次优先使用地面生成点(y<2)
+    this.groundSpawns = spawns.filter((s) => s.y < 2);
+    if (this.groundSpawns.length === 0) this.groundSpawns = spawns;
+  }
 
   update(dt: number, alive: number) {
     const s = this.state;
@@ -49,7 +56,9 @@ export class WaveManager {
     for (const q of this.spawnQueue) q.delay -= dt;
     while (this.spawnQueue.length && this.spawnQueue[0].delay <= 0 && alive + 1 < 24) {
       const q = this.spawnQueue.shift()!;
-      const sp = this.spawns[this.spawnCursor++ % this.spawns.length];
+      // 早期波次(1-2)使用地面生成点,后期使用全部
+      const spawns = s.wave <= 2 ? this.groundSpawns : this.allSpawns;
+      const sp = spawns[this.spawnCursor++ % spawns.length];
       const npc = new Npc(q.cls, (this.spawnCursor * 7) % 8, sp.clone());
       this.onSpawn(npc);
     }

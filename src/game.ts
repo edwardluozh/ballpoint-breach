@@ -315,6 +315,7 @@ export class Game {
       em: this.em,
       others: this.npcs,
       audio: this.audio,
+      spawns: this.arena.points.enemySpawns,
     };
     for (const n of this.npcs) n.update(ctx);
 

@@ -38,6 +38,7 @@ export interface NpcCtx {
   others: Npc[];
   now: number;
   audio?: { play: (type: any, opts?: { gain?: number; pitch?: number }) => void };
+  spawns: THREE.Vector3[];
 }
 
 let nextId = 1;
@@ -74,6 +75,8 @@ export class Npc {
   private losCache = false;
   private losTimer = 0;
   private wantMove = new THREE.Vector3();
+  private idleTimer = 0;
+  private lastProgressPos = new THREE.Vector3();
 
   constructor(cls: NpcClass, variantSeed: number, spawn: THREE.Vector3) {
     this.cls = cls;
@@ -82,6 +85,7 @@ export class Npc {
     this.hp = this.maxHp = CLASS_STATS[cls].hp;
     this.pos.copy(spawn);
     this.lastPos.copy(spawn);
+    this.lastProgressPos.copy(spawn);
     this.syncTransform();
   }
 
@@ -211,6 +215,25 @@ export class Npc {
     this.syncTransform();
     const speed01 = Math.min(1, this.wantMove.length());
     animateNpc(this.model, this.gait, speed01, this.attackAnimT, this.staggerT);
+
+    // 坠落或出界恢复
+    if (this.pos.y < -5 || Math.abs(this.pos.x) > 38 || Math.abs(this.pos.z) > 48) {
+      this.teleportToValid(ctx);
+      return;
+    }
+    
+    // 长时间无进展检测(15秒未移动显著距离)
+    const progressDist = this.pos.distanceTo(this.lastProgressPos);
+    if (progressDist > 3) {
+      this.lastProgressPos.copy(this.pos);
+      this.idleTimer = 0;
+    } else {
+      this.idleTimer += dt;
+      if (this.idleTimer > 15) {
+        this.teleportToValid(ctx);
+        this.idleTimer = 0;
+      }
+    }
   }
 
   private attack(ctx: NpcCtx, toPlayer: THREE.Vector3) {
@@ -269,6 +292,35 @@ export class Npc {
   }
 
   /** 卡死恢复:放弃当前目标,选择确定性可行邻居或逃逸向 */
+  private teleportToValid(ctx: NpcCtx) {
+    // 传送到最近的地面生成点(y<2,距离玩家>8)
+    const validSpawns = ctx.spawns.filter((s) => s.y < 2);
+    if (validSpawns.length === 0) return;
+    
+    // 找最近玩家但不太近的点
+    let best: THREE.Vector3 | null = null;
+    let bestScore = -Infinity;
+    for (const sp of validSpawns) {
+      const distToPlayer = _tempVec1.copy(sp).setY(0).distanceTo(_tempVec2.set(ctx.playerPos.x, 0, ctx.playerPos.z));
+      if (distToPlayer < 8) continue;
+      // 权重:接近玩家但不太近
+      const score = -distToPlayer;
+      if (score > bestScore) {
+        bestScore = score;
+        best = sp;
+      }
+    }
+    if (best) {
+      this.pos.copy(best);
+      this.lastPos.copy(best);
+      this.lastProgressPos.copy(best);
+      this.vel.set(0, 0, 0);
+      this.state = 'seek';
+      this.navPath = [];
+      this.idleTimer = 0;
+    }
+  }
+
   private recoverStuck(ctx: NpcCtx) {
     this.navPath = [];
     // 确定性逃逸:与当前位置相对墙的法线合成的开阔向
