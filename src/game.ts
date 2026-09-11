@@ -15,6 +15,7 @@ import { SLOT_ORDER, WEAPONS } from './weapons/defs';
 import { FxPool } from './fx/pools';
 import { DeathInkSystem } from './fx/deathInk';
 import { Hud, type HudState } from './hud/hud';
+import { AudioSystem } from './audio/audio';
 
 export interface GameOpts {
   qa: { capture?: boolean; stress?: boolean; ink?: boolean; view?: string; auto?: boolean };
@@ -37,6 +38,7 @@ export class Game {
   fx: FxPool;
   deathInk = new DeathInkSystem();
   hud: Hud;
+  audio = new AudioSystem();
   banner: { text: string; sub: string; t: number } | null = null;
   hint = 'WASD 移动 · 按 1-5 切换武器';
   boss: Boss | null = null;
@@ -63,8 +65,13 @@ export class Game {
   };
 
   constructor(canvas: HTMLCanvasElement, hudCanvas: HTMLCanvasElement, input: Input, public opts: GameOpts) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    this.renderer = new THREE.WebGLRenderer({ 
+      canvas, 
+      antialias: false, 
+      powerPreference: 'high-performance',
+      stencil: false
+    });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
     this.renderer.setClearColor(PAL.paperCool, 1);
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.08, 400);
@@ -80,6 +87,7 @@ export class Game {
     this.scene.add(this.projectiles.object);
 
     this.player = new PlayerController(this.arena.colliders, input);
+    this.player.audio = this.audio;
 
     this.fx = new FxPool();
     this.scene.add(this.fx.object);
@@ -95,6 +103,7 @@ export class Game {
       playerPos: this.player.state.pos,
       grappleAnchors: this.arena.points.grappleAnchors,
       boss: null,
+      audio: this.audio,
     });
     this.camera.add(this.weapons.object);
     this.scene.add(this.camera);   // camera 子级(viewmodel)需要 camera 在场景内
@@ -116,6 +125,7 @@ export class Game {
       const pts = Math.round(st.score * (head ? 2 : 1) * (1 + (this.combo - 1) * 0.1));
       this.score += pts;
       this.killFeed.push({ text: `${head ? '爆头' : st.label} +${pts}`, points: pts, t: 3 });
+      this.audio.play('death', { gain: 0.6, pitch: 0.9 + Math.random() * 0.3 });
       // 死亡墨水:剪影+碎片+地面/墙面沉积
       const hit = this.arena.colliders.raycast(
         new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.2, enemy.pos.z), impactDir, 3.5);
@@ -140,6 +150,7 @@ export class Game {
       this.hp -= dmg;
       this.hurt = Math.min(1, this.hurt + 0.38);
       this.hurtDir.copy(fromDir);
+      this.audio.play('hurt', { gain: 0.7 });
       if (this.hp <= 0) { this.hp = 0; this.gameOver = true; }
     });
     this.em.on('killFeed', ({ text, points }) => {

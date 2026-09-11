@@ -19,14 +19,17 @@ export interface PlayerState {
   landImpact: number;      // 0..1 落地响应(衰减)
 }
 
-const WALK = 5.2;
-const SPRINT = 8.2;
-const AIR_CTRL = 2.6;
-const GRAVITY = 22;
-const JUMP_V = 7.4;
+const WALK = 5.8;
+const SPRINT = 9.2;
+const AIR_CTRL = 3.2;
+const GRAVITY = 26;
+const JUMP_V = 7.8;
 const RADIUS = 0.38;
 const HEIGHT = 1.75;
 const STEP_TOL = 0.45;
+const ACCEL_GROUND = 32;
+const ACCEL_AIR = 4.5;
+const FRICTION = 0.18;
 
 export class PlayerController {
   state: PlayerState = {
@@ -42,6 +45,9 @@ export class PlayerController {
   };
   /** 相机附加微晃(克制) */
   camBob = { x: 0, y: 0 };
+  audio?: { play: (type: any, opts?: { gain?: number; pitch?: number }) => void };
+  private lastGaitPhase = 0;
+  private stepCooldown = 0;
 
   constructor(private colliders: ColliderWorld, private input: Input) {}
 
@@ -63,15 +69,20 @@ export class PlayerController {
     const targetSpeed = s.sprinting ? SPRINT : WALK;
     if (moving) want.normalize().multiplyScalar(targetSpeed);
 
-    // 平滑加速
-    const accel = s.grounded ? 26 : AIR_CTRL;
+    // 更紧的加速和摩擦
+    const accel = s.grounded ? ACCEL_GROUND : ACCEL_AIR;
     const hv = new THREE.Vector3(s.vel.x, 0, s.vel.z);
-    hv.lerp(moving ? want : new THREE.Vector3(), Math.min(1, accel * dt * (s.grounded ? 1 : 0.4)));
+    if (moving) {
+      hv.lerp(want, Math.min(1, accel * dt));
+    } else if (s.grounded) {
+      hv.multiplyScalar(Math.max(0, 1 - FRICTION));
+    }
     s.vel.x = hv.x; s.vel.z = hv.z;
 
     if (inp.jumpQueued && s.grounded) {
       s.vel.y = JUMP_V;
       s.grounded = false;
+      if (this.audio) this.audio.play('jump', { gain: 0.5 });
     }
     s.vel.y -= GRAVITY * dt;
 
@@ -87,11 +98,15 @@ export class PlayerController {
     const groundY = this.colliders.groundHeight(s.pos.x, s.pos.z, s.pos.y, STEP_TOL + 0.1);
     s.pos.y += s.vel.y * dt;
     if (s.pos.y <= groundY + 0.001 && s.vel.y <= 0) {
-      if (!s.grounded && s.vel.y < -6) s.landImpact = Math.min(1, -s.vel.y / 14);
+      const wasAirborne = !s.grounded;
+      if (wasAirborne && s.vel.y < -4) {
+        s.landImpact = Math.min(1, -s.vel.y / 12);
+        if (this.audio) this.audio.play('land', { gain: Math.min(0.6, s.landImpact * 0.8) });
+      }
       s.pos.y = groundY;
       s.vel.y = 0;
       s.grounded = true;
-    } else if (s.pos.y > groundY + 0.02) {
+    } else if (s.pos.y > groundY + 0.03) {
       s.grounded = false;
     }
     // 步阶:贴地时若前方支撑面更高且 < STEP_TOL,直接抬上去
@@ -110,8 +125,21 @@ export class PlayerController {
     s.pos.z = THREE.MathUtils.clamp(s.pos.z, -45.4, 31.4);
 
     // 步态相位:距离驱动(1.68Hz @ 跑速 → 每米约 0.32 周期)
+    const prevGait = this.lastGaitPhase;
     s.gaitPhase += actualDisp.length() * 1.62;
+    this.lastGaitPhase = s.gaitPhase;
     s.landImpact = Math.max(0, s.landImpact - dt * 3.2);
+
+    // 脚步声(步态周期过π的倍数时触发)
+    this.stepCooldown = Math.max(0, this.stepCooldown - dt);
+    if (s.grounded && s.speed > 1 && this.stepCooldown <= 0) {
+      const prevCycle = Math.floor(prevGait / Math.PI);
+      const curCycle = Math.floor(s.gaitPhase / Math.PI);
+      if (curCycle > prevCycle) {
+        if (this.audio) this.audio.play('step', { gain: 0.3, pitch: 0.9 + Math.random() * 0.2 });
+        this.stepCooldown = 0.1;
+      }
+    }
 
     // 相机克制微晃(振幅远小于武器摆动)
     const bobAmp = Math.min(1, s.speed / WALK);

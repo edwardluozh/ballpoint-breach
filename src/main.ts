@@ -74,6 +74,7 @@ window.__bb = {
 /* ---------- 进入/暂停 ---------- */
 async function enterGame() {
   if (!game) return;
+  await game.audio.resumeIfNeeded();
   enterScreen.hidden = true;
   const ok = await input.requestLock();
   if (!ok) setStage('自由瞄准模式(无指针锁定)');

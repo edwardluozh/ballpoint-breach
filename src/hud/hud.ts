@@ -38,6 +38,8 @@ const HAND = '"KaiTi", "楷体", "STKaiti", "Comic Sans MS", cursive';
 export class Hud {
   private ctx: CanvasRenderingContext2D;
   private w = 0; private h = 0; private s = 1; // s: 相对 952 高度的缩放
+  private lastDrawTime = 0;
+  private drawInterval = 1000 / 60; // 60Hz 上限
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -53,6 +55,10 @@ export class Hud {
   }
 
   draw(st: HudState) {
+    const now = performance.now();
+    if (now - this.lastDrawTime < this.drawInterval) return;
+    this.lastDrawTime = now;
+    
     const c = this.ctx;
     c.clearRect(0, 0, this.w, this.h);
     const s = this.s;
