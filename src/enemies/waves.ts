@@ -27,6 +27,9 @@ export class WaveManager {
   private spawnQueue: { cls: NpcClass; delay: number }[] = [];
   private spawnCursor = 0;
   private allSpawns: THREE.Vector3[] = [];
+  private onWaveClear?: () => void;
+  private usedSpawns = new Set<number>(); // 本波次已使用的生成点索引
+  private lastSpawnIdx = -1;
 
   constructor(
     spawns: THREE.Vector3[],
@@ -36,6 +39,10 @@ export class WaveManager {
     private onAllCleared: () => void,
   ) {
     this.allSpawns = spawns;
+  }
+
+  setWaveClearCallback(cb: () => void) {
+    this.onWaveClear = cb;
   }
 
   update(dt: number, alive: number, playerPos?: THREE.Vector3) {
@@ -63,6 +70,10 @@ export class WaveManager {
     if (s.enemiesLeft === 0 && s.intermission <= 0) {
       // 波清
       this.em.emit('killFeed', { text: `第 ${s.wave} 波已清除 · 喘口气 +800`, points: 800 });
+      if (this.onWaveClear) this.onWaveClear();
+      // 重置本波次使用的生成点
+      this.usedSpawns.clear();
+      this.lastSpawnIdx = -1;
       if (s.wave >= 5) {
         s.cleared = true;
         this.onAllCleared();
@@ -96,33 +107,45 @@ export class WaveManager {
       return this.allSpawns[this.spawnCursor % this.allSpawns.length];
     }
 
-    // 寻找距离玩家最远的生成点(最小 18-25m)
+    // 寻找未使用的、距离玩家最远且与上次生成点距离>8m的点
     let best: THREE.Vector3 | null = null;
-    let bestDist = 0;
+    let bestIdx = -1;
+    let bestScore = -Infinity;
     const pFlat = new THREE.Vector3(playerPos.x, 0, playerPos.z);
+    const lastSpawn = this.lastSpawnIdx >= 0 ? this.allSpawns[this.lastSpawnIdx] : null;
 
-    for (const sp of this.allSpawns) {
+    for (let i = 0; i < this.allSpawns.length; i++) {
+      const sp = this.allSpawns[i];
+      // 跳过本波次已用的点
+      if (this.usedSpawns.has(i)) continue;
+      
       const spFlat = new THREE.Vector3(sp.x, 0, sp.z);
-      const dist = pFlat.distanceTo(spFlat);
-      // 优先选择远距离点(18m+),如果都远就选最远的
-      if (dist > bestDist && dist >= 18) {
-        bestDist = dist;
+      const distToPlayer = pFlat.distanceTo(spFlat);
+      
+      // 与上次生成点距离
+      let distToLast = 0;
+      if (lastSpawn) {
+        const lastFlat = new THREE.Vector3(lastSpawn.x, 0, lastSpawn.z);
+        distToLast = spFlat.distanceTo(lastFlat);
+      }
+      
+      // 评分:优先远离玩家(18m+)且远离上次生成点(8m+)
+      const score = distToPlayer * 2 + distToLast;
+      if (score > bestScore && distToPlayer >= 15) {
+        bestScore = score;
         best = sp;
+        bestIdx = i;
       }
     }
 
-    // 如果没有符合条件的,选相对较远的
+    // 如果所有点都用过,重置
     if (!best) {
-      for (const sp of this.allSpawns) {
-        const spFlat = new THREE.Vector3(sp.x, 0, sp.z);
-        const dist = pFlat.distanceTo(spFlat);
-        if (dist > bestDist) {
-          bestDist = dist;
-          best = sp;
-        }
-      }
+      this.usedSpawns.clear();
+      return this.selectFarSpawn(playerPos);
     }
 
-    return best || this.allSpawns[0];
+    this.usedSpawns.add(bestIdx);
+    this.lastSpawnIdx = bestIdx;
+    return best;
   }
 }

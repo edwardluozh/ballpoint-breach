@@ -141,25 +141,29 @@ export class Hud {
 
     /* ---------- 右下:武器列表 + 当前武器名 ---------- */
     c.textAlign = 'right';
-    let wy = this.h - 34 * s;
+    // 当前武器标题在最底部
+    const cur = WEAPONS[st.current];
+    let wy = this.h - 10 * s;
+    c.font = `${Math.round(16 * s)}px ${HAND}`;
+    c.fillStyle = 'rgba(41,39,127,0.75)';
+    c.fillText(cur.note, this.w - 30 * s, wy);
+    wy -= 24 * s;
+    c.font = `${Math.round(30 * s)}px ${HAND}`;
+    c.fillStyle = PAL_CSS.ink;
+    c.fillText(cur.label, this.w - 30 * s, wy);
+    wy -= 40 * s;
+    // 武器列表在标题上方
     for (let i = SLOT_ORDER.length - 1; i >= 0; i--) {
       const id = SLOT_ORDER[i];
       const d = WEAPONS[id];
       const a = st.ammoAll[id];
-      const cur = id === st.current;
-      c.font = `${Math.round((cur ? 21 : 17) * s)}px ${HAND}`;
-      c.fillStyle = cur ? PAL_CSS.ink : 'rgba(41,39,127,0.55)';
+      const isCur = id === st.current;
+      c.font = `${Math.round((isCur ? 21 : 17) * s)}px ${HAND}`;
+      c.fillStyle = isCur ? PAL_CSS.ink : 'rgba(41,39,127,0.55)';
       const ammoStr = Number.isFinite(d.magSize) ? `${a.inMag}/${a.reserve}` : '∞';
       c.fillText(`[${d.slot}] ${d.label}  ${ammoStr}`, this.w - 30 * s, wy);
       wy -= 26 * s;
     }
-    const cur = WEAPONS[st.current];
-    c.font = `${Math.round(30 * s)}px ${HAND}`;
-    c.fillStyle = PAL_CSS.ink;
-    c.fillText(cur.label, this.w - 30 * s, wy - 6 * s);
-    c.font = `${Math.round(16 * s)}px ${HAND}`;
-    c.fillStyle = 'rgba(41,39,127,0.75)';
-    c.fillText(cur.note, this.w - 30 * s, wy + 18 * s);
     c.textAlign = 'left';
 
     /* ---------- 中下:情境提示 ---------- */

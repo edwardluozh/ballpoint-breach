@@ -16,6 +16,7 @@ import { FxPool } from './fx/pools';
 import { DeathInkSystem } from './fx/deathInk';
 import { Hud, type HudState } from './hud/hud';
 import { AudioSystem } from './audio/audio';
+import { PickupPool } from './fx/pickups';
 
 export interface GameOpts {
   qa: { capture?: boolean; stress?: boolean; ink?: boolean; view?: string; auto?: boolean };
@@ -37,6 +38,7 @@ export class Game {
   weapons: WeaponSystem;
   fx: FxPool;
   deathInk = new DeathInkSystem();
+  pickups: PickupPool;
   hud: Hud;
   audio = new AudioSystem();
   banner: { text: string; sub: string; t: number } | null = null;
@@ -92,6 +94,7 @@ export class Game {
     this.fx = new FxPool();
     this.scene.add(this.fx.object);
     this.scene.add(this.deathInk.object);
+    this.pickups = new PickupPool(this.scene);
     this.weapons = new WeaponSystem({
       camera: this.camera,
       input,
@@ -117,6 +120,19 @@ export class Game {
       () => this.spawnBoss(),
       () => { this.victory = true; },
     );
+    this.waves.setWaveClearCallback(() => {
+      // 波次清除奖励:1-2个生命包
+      const count = 1 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < count; i++) {
+        const sp = this.arena.points.enemySpawns[Math.floor(Math.random() * this.arena.points.enemySpawns.length)];
+        this.pickups.spawn('health', sp.clone());
+      }
+      // 弹药包
+      for (let i = 0; i < 2; i++) {
+        const sp = this.arena.points.enemySpawns[Math.floor(Math.random() * this.arena.points.enemySpawns.length)];
+        this.pickups.spawn('ammo', sp.clone());
+      }
+    });
 
     // 事件接线
     this.em.on('enemyDied', ({ enemy, head, impactDir }) => {
@@ -144,6 +160,14 @@ export class Game {
       this.scene.remove(enemy.model.group);
       const idx = this.npcs.indexOf(enemy);
       if (idx >= 0) this.npcs.splice(idx, 1);
+      
+      // 掉落物(30%弹药, 15%生命)
+      const r = Math.random();
+      if (r < 0.30) {
+        this.pickups.spawn('ammo', enemy.pos.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      } else if (r < 0.45) {
+        this.pickups.spawn('health', enemy.pos.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      }
     });
     this.em.on('enemyAttackProjectile', ({ from, to, dmg, enemy }) => {
       const dir = new THREE.Vector3().subVectors(to, from).normalize();
@@ -368,6 +392,24 @@ export class Game {
     // FX
     this.fx.update(dt, (x, z) => this.arena.colliders.groundHeight(x, z, 8, 0.5));
     this.deathInk.update(dt, (x, z) => this.arena.colliders.groundHeight(x, z, 8, 0.5));
+    this.pickups.update(dt, this.player.state.pos, (type) => {
+      if (type === 'ammo') {
+        // 补充所有武器后备弹药(30-50%)
+        for (const id of SLOT_ORDER) {
+          if (id === 'katana') continue;
+          const d = WEAPONS[id];
+          const a = this.weapons.ammo[id];
+          const refill = Math.floor(d.reserveMax * (0.3 + Math.random() * 0.2));
+          a.reserve = Math.min(d.reserveMax, a.reserve + refill);
+        }
+        this.audio.play('reload', { gain: 0.5, pitch: 1.2 });
+      } else if (type === 'health') {
+        const heal = 25 + Math.floor(Math.random() * 16); // 25-40
+        this.hp = Math.min(this.hpMax, this.hp + heal);
+        this.em.emit('playerHeal', { amount: heal });
+        this.audio.play('jump', { gain: 0.6, pitch: 1.4 });
+      }
+    });
 
     // 波间恢复
     if (this.waves.state.intermission > 5.9) {

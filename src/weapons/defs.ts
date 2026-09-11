@@ -28,25 +28,25 @@ export interface WeaponDef {
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   rifle: {
     id: 'rifle', slot: 1, label: '步枪', note: '全自动 · 用全息镜瞄准',
-    magSize: 30, reserveStart: 150, reserveMax: 300, auto: true, fireInterval: 0.105,
+    magSize: 30, reserveStart: 60, reserveMax: 180, auto: true, fireInterval: 0.105,
     damage: 12, pellets: 1, spread: 0.011, reloadTime: 1.5, delayKind: 'none', delayTime: 0,
     ejectAt: 0.02, recoilKick: 0.035, recoilCam: 0.006, barricadeMul: 1,
   },
   shotgun: {
     id: 'shotgun', slot: 2, label: '霰弹枪', note: '泵动 · 近距离毁灭一切',
-    magSize: 6, reserveStart: 30, reserveMax: 60, auto: false, fireInterval: 0.95,
+    magSize: 6, reserveStart: 12, reserveMax: 36, auto: false, fireInterval: 0.95,
     damage: 11, pellets: 12, spread: 0.055, reloadTime: 2.1, delayKind: 'pump', delayTime: 0.27,
     ejectAt: 0.27, recoilKick: 0.12, recoilCam: 0.028, barricadeMul: 2.6,
   },
   revolver: {
     id: 'revolver', slot: 3, label: '左轮', note: '手炮 · 爆头即抹除',
-    magSize: 6, reserveStart: 36, reserveMax: 72, auto: false, fireInterval: 0.5,
+    magSize: 6, reserveStart: 18, reserveMax: 48, auto: false, fireInterval: 0.5,
     damage: 40, pellets: 1, spread: 0.004, reloadTime: 2.0, delayKind: 'none', delayTime: 0,
     ejectAt: Infinity, recoilKick: 0.14, recoilCam: 0.032, barricadeMul: 1.6,
   },
   sniper: {
     id: 'sniper', slot: 4, label: '狙击枪', note: '栓动开镜 · 一发一擦除',
-    magSize: 5, reserveStart: 25, reserveMax: 50, auto: false, fireInterval: 1.3,
+    magSize: 5, reserveStart: 10, reserveMax: 30, auto: false, fireInterval: 1.3,
     damage: 110, pellets: 1, spread: 0.0008, reloadTime: 2.4, delayKind: 'bolt', delayTime: 0.31,
     ejectAt: 0.31, recoilKick: 0.16, recoilCam: 0.038, barricadeMul: 1.8,
   },
