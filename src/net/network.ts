@@ -18,7 +18,7 @@ export interface PlayerState {
 }
 
 export interface NetMessage {
-  type: 'ready' | 'lobby' | 'team' | 'start' | 'state' | 'input' | 'shoot' | 'hit' | 'death' | 'end';
+  type: 'ready' | 'roster' | 'lobby' | 'team' | 'start' | 'state' | 'input' | 'shoot' | 'hit' | 'death' | 'end';
   [key: string]: unknown;
 }
 

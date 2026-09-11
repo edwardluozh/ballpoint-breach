@@ -177,17 +177,42 @@ function handleLobbyMessage(msg: any) {
       lobby.updateRoster(lobbyPlayers);
     }
     
-    // 转发给其他客户端
+    // 发送完整roster给新加入的guest
+    const rosterData = Array.from(lobbyPlayers.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      team: p.team,
+      ready: p.ready,
+    }));
+    net!.send({ type: 'roster', players: rosterData }, msg.id);
+    
+    // 转发给其他客户端(让其他人知道有新玩家)
     net!.send(msg);
+  } else if (msg.type === 'roster') {
+    // 完整名单同步(guest接收)
+    const players = msg.players as Array<{ id: string; name: string; team: any; ready: boolean }>;
+    for (const p of players) {
+      lobbyPlayers.set(p.id, p);
+    }
+    if (lobby) {
+      lobby.updateRoster(lobbyPlayers);
+    }
   } else if (msg.type === 'team') {
-    // 队伍变更
-    if (lobbyPlayers.has(msg.id)) {
+    // 队伍变更 - upsert机制,自动添加不存在的玩家
+    if (!lobbyPlayers.has(msg.id)) {
+      lobbyPlayers.set(msg.id, {
+        id: msg.id,
+        name: msg.name || 'Player',
+        team: msg.team,
+        ready: true,
+      });
+    } else {
       const p = lobbyPlayers.get(msg.id)!;
       p.team = msg.team;
       lobbyPlayers.set(msg.id, p);
-      if (lobby) {
-        lobby.updateRoster(lobbyPlayers);
-      }
+    }
+    if (lobby) {
+      lobby.updateRoster(lobbyPlayers);
     }
   } else if (msg.type === 'start') {
     // 对战开始
@@ -218,6 +243,13 @@ function startPvPMatch() {
     input,
   );
   pvpGame.myTeam = myTeam;
+  
+  // 初始化远程玩家(从lobby名单)
+  for (const [id, player] of lobbyPlayers) {
+    if (id !== net!.myId) {
+      pvpGame.addRemotePlayer(id, player.name, player.team);
+    }
+  }
   
   // 启动游戏
   enterScreen.hidden = true;

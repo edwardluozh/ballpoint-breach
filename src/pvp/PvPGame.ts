@@ -71,6 +71,29 @@ export class PvPGame {
     this.net.send({ type: 'team', id: this.net.myId, name: this.myName, team });
   }
 
+  addRemotePlayer(id: string, name: string, team: Team) {
+    if (this.remotePlayers.has(id)) return;
+    
+    const rp: RemotePlayer = {
+      id,
+      name,
+      team,
+      pos: new THREE.Vector3(),
+      vel: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      hp: 100,
+      maxHp: 100,
+      alive: false,
+      mesh: this.createRemotePlayerMesh(team),
+      weapon: 'rifle',
+    };
+    this.remotePlayers.set(id, rp);
+    if (rp.mesh) {
+      this.scene.add(rp.mesh);
+    }
+  }
+
   startMatch() {
     if (!this.isHost) return;
     
@@ -135,20 +158,23 @@ export class PvPGame {
     // 主机:运行物理,处理射击,广播状态
     
     if (this.alive) {
-      // 简化物理:WASD移动
+      // WASD移动 - 匹配solo PlayerController
       const speed = 5;
-      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+      const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
       
       const mx = this.input.state.move.x;
       const mz = this.input.state.move.z;
       
       if (mx !== 0 || mz !== 0) {
-        const move = new THREE.Vector3();
-        move.add(forward.clone().multiplyScalar(-mz));
-        move.add(right.clone().multiplyScalar(mx));
-        move.normalize().multiplyScalar(speed * dt);
-        this.pos.add(move);
+        const move = new THREE.Vector3()
+          .addScaledVector(fwd, mz)
+          .addScaledVector(right, mx);
+        
+        if (move.lengthSq() > 0) {
+          move.normalize().multiplyScalar(speed * dt);
+          this.pos.add(move);
+        }
         
         // 简化碰撞:保持在arena内
         const gh = this.colliders.groundHeight(this.pos.x, this.pos.z, 4, 0.5);
@@ -172,20 +198,23 @@ export class PvPGame {
     // 客户端:发送输入,接收状态
     
     if (this.alive) {
-      // 本地预测移动(简化)
+      // 本地预测移动 - 匹配solo PlayerController
       const speed = 5;
-      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
-      const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+      const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
       
       const mx = this.input.state.move.x;
       const mz = this.input.state.move.z;
       
       if (mx !== 0 || mz !== 0) {
-        const move = new THREE.Vector3();
-        move.add(forward.clone().multiplyScalar(-mz));
-        move.add(right.clone().multiplyScalar(mx));
-        move.normalize().multiplyScalar(speed * dt);
-        this.pos.add(move);
+        const move = new THREE.Vector3()
+          .addScaledVector(fwd, mz)
+          .addScaledVector(right, mx);
+        
+        if (move.lengthSq() > 0) {
+          move.normalize().multiplyScalar(speed * dt);
+          this.pos.add(move);
+        }
       }
     }
 
