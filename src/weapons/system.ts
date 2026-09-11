@@ -257,13 +257,13 @@ export class WeaponSystem {
     let head = false;
     for (const e of enemies) {
       if (e.dead) continue;
-      // 头
+      // 头(扩大判定 +20%)
       const headC = e.headWorld();
-      const hd = raySphere(origin, dir, headC, e.model.headRadius * 1.15);
-      // 身(胶囊:肚中心±0.6)
+      const hd = raySphere(origin, dir, headC, e.model.headRadius * 1.2);
+      // 身(胶囊:肚中心±0.6,使用动态半径)
       const bodyA = new THREE.Vector3(e.pos.x, e.pos.y + 0.5, e.pos.z);
       const bodyB = new THREE.Vector3(e.pos.x, e.pos.y + 1.5, e.pos.z);
-      const bd = rayCapsule(origin, dir, bodyA, bodyB, 0.42);
+      const bd = rayCapsule(origin, dir, bodyA, bodyB, e.bodyRadius);
       const hitD = hd !== null && (bd === null || hd <= bd) ? hd : bd;
       const isHead = hitD !== null && hd !== null && hitD === hd;
       if (hitD !== null && hitD < bestDist) {

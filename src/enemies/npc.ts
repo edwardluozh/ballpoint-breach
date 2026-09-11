@@ -97,6 +97,11 @@ export class Npc {
     return out;
   }
 
+  get bodyRadius(): number {
+    // Heavy 更胖,Rusher 更瘦,匹配模型实际尺寸
+    return this.cls === 'heavy' ? 0.50 : this.cls === 'rusher' ? 0.38 : 0.44;
+  }
+
   syncTransform() {
     this.model.group.position.copy(this.pos);
     this.model.group.rotation.y = this.yaw;
@@ -293,23 +298,35 @@ export class Npc {
 
   /** 卡死恢复:放弃当前目标,选择确定性可行邻居或逃逸向 */
   private teleportToValid(ctx: NpcCtx) {
-    // 传送到最近的地面生成点(y<2,距离玩家>8)
-    const validSpawns = ctx.spawns.filter((s) => s.y < 2);
-    if (validSpawns.length === 0) return;
+    // 传送到远离玩家的生成点(最小距离 12-18m)
+    if (ctx.spawns.length === 0) return;
     
-    // 找最近玩家但不太近的点
+    // 找最远生成点
     let best: THREE.Vector3 | null = null;
-    let bestScore = -Infinity;
-    for (const sp of validSpawns) {
-      const distToPlayer = _tempVec1.copy(sp).setY(0).distanceTo(_tempVec2.set(ctx.playerPos.x, 0, ctx.playerPos.z));
-      if (distToPlayer < 8) continue;
-      // 权重:接近玩家但不太近
-      const score = -distToPlayer;
-      if (score > bestScore) {
-        bestScore = score;
+    let bestDist = 0;
+    const pFlat = _tempVec1.set(ctx.playerPos.x, 0, ctx.playerPos.z);
+    
+    for (const sp of ctx.spawns) {
+      const spFlat = _tempVec2.set(sp.x, 0, sp.z);
+      const dist = pFlat.distanceTo(spFlat);
+      if (dist > bestDist && dist >= 12) {
+        bestDist = dist;
         best = sp;
       }
     }
+    
+    // 如果没有远点,选最远的
+    if (!best) {
+      for (const sp of ctx.spawns) {
+        const spFlat = _tempVec2.set(sp.x, 0, sp.z);
+        const dist = pFlat.distanceTo(spFlat);
+        if (dist > bestDist) {
+          bestDist = dist;
+          best = sp;
+        }
+      }
+    }
+    
     if (best) {
       this.pos.copy(best);
       this.lastPos.copy(best);
@@ -465,7 +482,8 @@ export class ProjectilePool {
         for (const e of ctx.enemies) {
           if (e.dead) continue;
           _projTemp1.set(e.pos.x, e.pos.y + 1.15, e.pos.z);
-          if (p.pos.distanceTo(_projTemp1) < 0.62) {
+          const hitDist = e.bodyRadius + 0.15; // 使用动态半径
+          if (p.pos.distanceTo(_projTemp1) < hitDist) {
             this.kill(p);
             _projTemp2.copy(p.vel).normalize();
             e.takeHit(p.dmg * 1.6, _projTemp2, false, ctx.em);

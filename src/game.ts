@@ -294,7 +294,7 @@ export class Game {
   private step(dt: number) {
     if (!this.gameOver && !this.victory) {
       this.player.update(dt);
-      this.waves.update(dt, this.npcs.length);
+      this.waves.update(dt, this.npcs.length, this.player.state.pos);
       this.weapons.update(dt, this.player.state.gaitPhase, this.player.state.sprinting);
       // 相机后坐
       const rc = this.weapons.consumeRecoilCam();
