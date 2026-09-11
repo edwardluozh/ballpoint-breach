@@ -122,10 +122,16 @@ export class Game {
     this.em.on('enemyDied', ({ enemy, head, impactDir }) => {
       const st = CLASS_STATS[enemy.cls];
       this.combo += 1; this.comboTimer = 4;
-      const pts = Math.round(st.score * (head ? 2 : 1) * (1 + (this.combo - 1) * 0.1));
+      const pts = Math.round(st.score * (head ? 2.4 : 1) * (1 + (this.combo - 1) * 0.1));
       this.score += pts;
-      this.killFeed.push({ text: `${head ? '爆头' : st.label} +${pts}`, points: pts, t: 3 });
-      this.audio.play('death', { gain: 0.6, pitch: 0.9 + Math.random() * 0.3 });
+      if (head) {
+        this.killFeed.push({ text: `💥 爆头 +${pts}`, points: pts, t: 3.5 });
+        this.audio.play('headshot', { gain: 0.9 });
+        this.audio.play('death', { gain: 0.4, pitch: 1.2 });
+      } else {
+        this.killFeed.push({ text: `${st.label} +${pts}`, points: pts, t: 3 });
+        this.audio.play('death', { gain: 0.6, pitch: 0.9 + Math.random() * 0.3 });
+      }
       // 死亡墨水:剪影+碎片+地面/墙面沉积
       const hit = this.arena.colliders.raycast(
         new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.2, enemy.pos.z), impactDir, 3.5);
@@ -308,6 +314,7 @@ export class Game {
       nav: this.nav,
       em: this.em,
       others: this.npcs,
+      audio: this.audio,
     };
     for (const n of this.npcs) n.update(ctx);
 

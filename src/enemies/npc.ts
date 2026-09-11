@@ -37,6 +37,7 @@ export interface NpcCtx {
   em: Emitter<GameEvents>;
   others: Npc[];
   now: number;
+  audio?: { play: (type: any, opts?: { gain?: number; pitch?: number }) => void };
 }
 
 let nextId = 1;
@@ -220,10 +221,12 @@ export class Npc {
       const from = this.eyePos;
       const to = _tempVec3.copy(ctx.playerEye);
       ctx.em.emit('enemyAttackProjectile', { from, to, dmg: st.dmg, enemy: this });
+      if (ctx.audio) ctx.audio.play('enemyShoot', { gain: 0.5 });
     } else {
       ctx.em.emit('enemyAttackMelee', { dmg: st.dmg, enemy: this });
       _tempVec3.copy(toPlayer).setY(0).normalize().negate();
       ctx.em.emit('playerHit', { dmg: st.dmg, fromDir: _tempVec3 });
+      if (ctx.audio) ctx.audio.play('enemyMelee', { gain: 0.6 });
     }
   }
 
@@ -299,8 +302,8 @@ interface Projectile {
   trail: THREE.Vector3[];
 }
 
-const projMatRed = new THREE.LineBasicMaterial({ color: PAL.red, transparent: true, opacity: 0.95 });
-const projMatInk = new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 0.95 });
+const projMatRed = new THREE.LineBasicMaterial({ color: PAL.red, transparent: true, opacity: 1.0, linewidth: 2 });
+const projMatInk = new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 1.0, linewidth: 2 });
 
 const _projTemp1 = new THREE.Vector3();
 const _projTemp2 = new THREE.Vector3();

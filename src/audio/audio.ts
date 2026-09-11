@@ -7,7 +7,8 @@ import { Rng } from '../core/rng';
 
 export type SfxType = 
   | 'pistol' | 'rifle' | 'shotgun' | 'sniper' | 'katana'
-  | 'reload' | 'hit' | 'hurt' | 'death' | 'jump' | 'land' | 'step';
+  | 'reload' | 'hit' | 'headshot' | 'hurt' | 'death' | 'jump' | 'land' | 'step'
+  | 'enemyShoot' | 'enemyMelee';
 
 export class AudioSystem {
   private ctx: AudioContext | null = null;
@@ -80,11 +81,14 @@ export class AudioSystem {
       case 'katana': this.playKatana(now, gain, pitch); break;
       case 'reload': this.playReload(now, gain); break;
       case 'hit': this.playHit(now, gain, pitch); break;
+      case 'headshot': this.playHeadshot(now, gain); break;
       case 'hurt': this.playHurt(now, gain); break;
       case 'death': this.playDeath(now, gain); break;
       case 'jump': this.playJump(now, gain); break;
       case 'land': this.playLand(now, gain); break;
       case 'step': this.playStep(now, gain); break;
+      case 'enemyShoot': this.playEnemyShoot(now, gain); break;
+      case 'enemyMelee': this.playEnemyMelee(now, gain); break;
     }
   }
 
@@ -94,14 +98,14 @@ export class AudioSystem {
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
     filt.type = 'lowpass';
-    filt.frequency.value = 800 * p;
-    filt.Q.value = 1.2;
+    filt.frequency.value = 900 * p;
+    filt.Q.value = 1.4;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.22 * g, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    gain.gain.setValueAtTime(0.38 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.08);
+    noise.stop(t + 0.10);
   }
 
   private playRifle(t: number, g: number, p: number) {
@@ -110,14 +114,14 @@ export class AudioSystem {
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
     filt.type = 'bandpass';
-    filt.frequency.value = 950 * p;
-    filt.Q.value = 2.5;
+    filt.frequency.value = 1050 * p;
+    filt.Q.value = 3.0;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.24 * g, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    gain.gain.setValueAtTime(0.42 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.09);
+    noise.stop(t + 0.11);
   }
 
   private playShotgun(t: number, g: number, p: number) {
@@ -126,14 +130,14 @@ export class AudioSystem {
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
     filt.type = 'lowpass';
-    filt.frequency.value = 380 * p;
-    filt.Q.value = 0.8;
+    filt.frequency.value = 420 * p;
+    filt.Q.value = 1.0;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.36 * g, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    gain.gain.setValueAtTime(0.54 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.26);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.22);
+    noise.stop(t + 0.26);
   }
 
   private playSniper(t: number, g: number, p: number) {
@@ -142,14 +146,14 @@ export class AudioSystem {
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
     filt.type = 'bandpass';
-    filt.frequency.value = 720 * p;
-    filt.Q.value = 3.2;
+    filt.frequency.value = 820 * p;
+    filt.Q.value = 3.8;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.32 * g, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    gain.gain.setValueAtTime(0.48 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.18);
+    noise.stop(t + 0.22);
   }
 
   private playKatana(t: number, g: number, p: number) {
@@ -188,14 +192,33 @@ export class AudioSystem {
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
     filt.type = 'bandpass';
-    filt.frequency.value = 1800 * p;
-    filt.Q.value = 4;
+    filt.frequency.value = 2200 * p;
+    filt.Q.value = 4.5;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.18 * g, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    gain.gain.setValueAtTime(0.24 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.06);
+    noise.stop(t + 0.07);
+  }
+
+  private playHeadshot(t: number, g: number) {
+    if (!this.ctx || !this.comp) return;
+    // 高频三角波脉冲
+    const osc = this.ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(3200, t);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.08);
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'highpass';
+    filt.frequency.value = 2400;
+    filt.Q.value = 2;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.28 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    osc.connect(filt).connect(gain).connect(this.comp);
+    osc.start(t);
+    osc.stop(t + 0.08);
   }
 
   private playHurt(t: number, g: number) {
@@ -261,14 +284,44 @@ export class AudioSystem {
     const noise = this.ctx.createBufferSource();
     noise.buffer = this.noiseBuffer;
     const filt = this.ctx.createBiquadFilter();
-    filt.type = 'highpass';
-    filt.frequency.value = 800;
-    filt.Q.value = 0.4;
+    filt.type = 'lowpass';
+    filt.frequency.value = 650;
+    filt.Q.value = 0.8;
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.05 * g, t);
-    gain.gain.linearRampToValueAtTime(0, t + 0.04);
+    gain.gain.setValueAtTime(0.18 * g, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.06);
     noise.connect(filt).connect(gain).connect(this.comp);
     noise.start(t);
-    noise.stop(t + 0.04);
+    noise.stop(t + 0.06);
+  }
+
+  private playEnemyShoot(t: number, g: number) {
+    if (!this.ctx || !this.comp || !this.noiseBuffer) return;
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass';
+    filt.frequency.value = 720;
+    filt.Q.value = 2.2;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.22 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    noise.connect(filt).connect(gain).connect(this.comp);
+    noise.start(t);
+    noise.stop(t + 0.08);
+  }
+
+  private playEnemyMelee(t: number, g: number) {
+    if (!this.ctx || !this.comp) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.exponentialRampToValueAtTime(180, t + 0.10);
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.16 * g, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+    osc.connect(gain).connect(this.comp);
+    osc.start(t);
+    osc.stop(t + 0.10);
   }
 }
