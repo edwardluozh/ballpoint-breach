@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BALLPOINT BREACH · 圆珠笔突围</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+    <!-- 屏幕空间纸张层:横格线 + 红边距线 -->
+    <div id="paper-rules" aria-hidden="true"></div>
+    <div id="paper-margin" aria-hidden="true"></div>
+    <!-- HUD 覆盖层(canvas 2d) -->
+    <canvas id="hud"></canvas>
+    <!-- 阶段/错误指示器 -->
+    <div id="stage-indicator"><span id="stage-text">启动中…</span></div>
+    <div id="error-box" hidden></div>
+    <!-- 点击进入屏 -->
+    <div id="enter-screen">
+      <h1>BALLPOINT BREACH</h1>
+      <p class="sub">横格笔记本纸上的圆珠笔第一人称射击</p>
+      <p class="hint">WASD 移动 · Shift 冲刺 · 空格 跳跃 · 鼠标 瞄准 · 左键 开火/斩击 · 右键 开镜/格挡反弹 · Q 抓钩 · 1-5 切换武器 · R 装填 · Esc 暂停</p>
+      <p class="cta">点击进入</p>
+      <p class="tiny">若浏览器不允许指针锁定,游戏会自动切换为可用的自由瞄准模式,不会暂停</p>
+    </div>
+    <div id="pause-screen" hidden>
+      <h2>已暂停</h2>
+      <p class="cta">点击继续</p>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
