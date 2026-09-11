@@ -106,10 +106,10 @@ export function buildNpcModel(variantSeed: number, cls: NpcClass = 'grunt'): Npc
   // ---- 变体参数 ----
   const headR = 0.32 * rng.range(0.97, 1.03);
   const headCx = rng.signed() * 0.02;
-  const bellyRx = rng.range(0.37, 0.39) * (cls === 'heavy' ? 1.06 : 1);
-  const bellyRy = bellyRx * rng.range(1.02, 1.14);
-  const legLen = rng.range(0.86, 0.94);
-  const legSpread = rng.range(0.10, 0.16);
+  const bellyRx = rng.range(0.37, 0.39) * (cls === 'heavy' ? 1.12 : cls === 'rusher' ? 0.92 : 1);
+  const bellyRy = bellyRx * rng.range(1.02, 1.14) * (cls === 'heavy' ? 1.08 : 1);
+  const legLen = rng.range(0.86, 0.94) * (cls === 'rusher' ? 1.08 : 1);
+  const legSpread = rng.range(0.10, 0.16) * (cls === 'rusher' ? 1.15 : 1);
   const browTilt = rng.signed() * 0.35;
   const mouthOpen = rng.chance(0.4);
   const armElbowR = new THREE.Vector3(rng.range(0.46, 0.58), rng.range(1.50, 1.66), 0);
@@ -123,33 +123,57 @@ export function buildNpcModel(variantSeed: number, cls: NpcClass = 'grunt'): Npc
 
   /* ============ 躯干静态批(头/肚/脸/臂/手套) ============ */
   const body = new Batch();
-  const headPts = wobblyCircle(headCx, headCY, headR, 1, rng);
+  const headPts = wobblyCircle(headCx, headCY, headR, 0.96, rng, 20);
   body.loop(headPts, C_RED);
+  body.loop(headPts, C_RED, 0.3);
   body.fan(new THREE.Vector3(headCx, headCY, -0.001), headPts);
-  const bellyPts = wobblyCircle(0, bellyCY, bellyRx, bellyRy / bellyRx, rng);
+  const bellyPts = wobblyCircle(0, bellyCY, bellyRx, bellyRy / bellyRx, rng, 20);
   body.loop(bellyPts, C_RED);
+  body.loop(bellyPts, C_RED, 0.25);
   body.fan(new THREE.Vector3(0, bellyCY, -0.002), bellyPts);
+  
+  // 颈部连接
+  body.seg(
+    new THREE.Vector3(headCx - headR * 0.3, headCY - headR, 0),
+    new THREE.Vector3(-bellyRx * 0.25, bellyCY + bellyRy, 0),
+    C_RED, 0.85
+  );
+  body.seg(
+    new THREE.Vector3(headCx + headR * 0.3, headCY - headR, 0),
+    new THREE.Vector3(bellyRx * 0.25, bellyCY + bellyRy, 0),
+    C_RED, 0.85
+  );
 
-  // 脸(石墨 + 细红眼线)
+  // 脸(更清晰的眉毛和眼睛)
   const eyeY = headCY + 0.05, eyeDX = headR * 0.42;
-  const browLen = headR * 0.34;
+  const browLen = headR * 0.38;
+  const browThick = cls === 'heavy' ? 0.018 : 0.012;
   for (const s of [-1, 1] as const) {
     const ex = headCx + s * eyeDX;
     const bt = browTilt * s;
-    for (const dy of [0.10, 0.085]) {
+    // 加粗眉毛
+    for (const dy of [0.10, 0.10 - browThick]) {
       body.seg(
         new THREE.Vector3(ex - browLen / 2, eyeY + dy - bt * 0.5, 0.01),
         new THREE.Vector3(ex + browLen / 2, eyeY + dy + bt * 0.5, 0.01),
-        C_GRAPHITE,
+        C_GRAPHITE, 0.95
       );
     }
-    for (const dy of [-0.045, -0.055]) {
+    // 更立体的眼睛
+    const eyeW = cls === 'marksman' ? 0.026 : 0.022;
+    for (const dy of [-0.040, -0.052]) {
       body.seg(
-        new THREE.Vector3(ex - 0.022, eyeY + dy, 0.01),
-        new THREE.Vector3(ex + 0.022, eyeY + dy + 0.015, 0.01),
-        C_GRAPHITE,
+        new THREE.Vector3(ex - eyeW, eyeY + dy, 0.01),
+        new THREE.Vector3(ex + eyeW, eyeY + dy + 0.015, 0.01),
+        C_GRAPHITE, 0.95
       );
     }
+    // 眼白高光
+    body.seg(
+      new THREE.Vector3(ex - eyeW * 0.6, eyeY - 0.038, 0.012),
+      new THREE.Vector3(ex - eyeW * 0.3, eyeY - 0.035, 0.012),
+      new THREE.Color(PAL.paperWhite), 0.7
+    );
   }
   body.seg(
     new THREE.Vector3(headCx, eyeY - 0.10, 0.01),
@@ -236,10 +260,10 @@ export function buildNpcModel(variantSeed: number, cls: NpcClass = 'grunt'): Npc
   const legL = mkLeg(1);
   const legR = mkLeg(-1);
 
-  /* ============ 武器(独立组:攻击后坐动画) ============ */
+  /* ============ 武器(独立组:攻击后坐动画,更清晰的职业差异) ============ */
   const weapon = new THREE.Group();
-  const wLen = cls === 'marksman' ? 1.05 : cls === 'heavy' ? 0.8 : 0.85;
-  const wW = cls === 'heavy' ? 0.11 : 0.07;
+  const wLen = cls === 'marksman' ? 1.15 : cls === 'heavy' ? 0.95 : cls === 'rusher' ? 0.65 : 0.88;
+  const wW = cls === 'heavy' ? 0.14 : cls === 'marksman' ? 0.06 : 0.075;
   const wCy = 1.55;
   weapon.position.set(wOffX, wCy, 0.06);
   weapon.rotation.z = wTilt;
@@ -249,16 +273,49 @@ export function buildNpcModel(variantSeed: number, cls: NpcClass = 'grunt'): Npc
     new THREE.Vector3(wW / 2, half), new THREE.Vector3(wW / 2, -half),
   ];
   const wb = new Batch();
-  wb.loop(wq, C_INK);
+  wb.loop(wq, C_INK, 0.95);
   wb.fan(new THREE.Vector3(0, 0, -0.002), wq);
-  const fillCol = cls === 'marksman' ? C_RED_FILL : C_GRAPHITE;
-  for (let i = 0; i < 6; i++) {
-    const y = -half + (i + 0.5) * (wLen / 6);
-    wb.seg(new THREE.Vector3(-wW / 2 * 0.7, y, 0), new THREE.Vector3(wW / 2 * 0.7, y + 0.02, 0), fillCol, cls === 'marksman' ? 0.55 : 0.5);
+  
+  // 职业特色装饰
+  const fillCol = cls === 'marksman' ? C_RED_FILL : cls === 'heavy' ? new THREE.Color(0x4a4a4a) : C_GRAPHITE;
+  const detailCount = cls === 'heavy' ? 8 : cls === 'marksman' ? 5 : 6;
+  for (let i = 0; i < detailCount; i++) {
+    const y = -half + (i + 0.5) * (wLen / detailCount);
+    wb.seg(
+      new THREE.Vector3(-wW / 2 * 0.75, y, 0), 
+      new THREE.Vector3(wW / 2 * 0.75, y + 0.02, 0), 
+      fillCol, 
+      cls === 'marksman' ? 0.6 : 0.55
+    );
   }
+  
+  // Marksman 瞄准镜
   if (cls === 'marksman') {
-    wb.seg(new THREE.Vector3(0, half - 0.02, 0.01), new THREE.Vector3(0, half + 0.08, 0.01), C_RED);
+    wb.seg(new THREE.Vector3(0, half - 0.02, 0.01), new THREE.Vector3(0, half + 0.12, 0.01), C_RED, 0.9);
+    wb.loop([
+      new THREE.Vector3(-0.04, half + 0.06, 0.012),
+      new THREE.Vector3(-0.04, half + 0.10, 0.012),
+      new THREE.Vector3(0.04, half + 0.10, 0.012),
+      new THREE.Vector3(0.04, half + 0.06, 0.012),
+    ], C_RED, 0.75);
   }
+  
+  // Heavy 枪口加粗
+  if (cls === 'heavy') {
+    wb.loop([
+      new THREE.Vector3(-wW * 0.55, half, 0.01),
+      new THREE.Vector3(-wW * 0.55, half + 0.08, 0.01),
+      new THREE.Vector3(wW * 0.55, half + 0.08, 0.01),
+      new THREE.Vector3(wW * 0.55, half, 0.01),
+    ], C_INK, 0.85);
+  }
+  
+  // Rusher 刀刃
+  if (cls === 'rusher') {
+    wb.seg(new THREE.Vector3(0, half, 0.01), new THREE.Vector3(0, half + 0.18, 0.01), C_INK, 0.9);
+    wb.seg(new THREE.Vector3(-0.02, half + 0.16, 0.01), new THREE.Vector3(0.02, half + 0.16, 0.01), C_INK, 0.9);
+  }
+  
   weapon.add(wb.buildLines());
   weapon.add(wb.buildFill());
   root.add(weapon);
@@ -280,6 +337,8 @@ export function animateNpc(p: NpcModelParts, gaitPhase: number, speed01: number,
   p.legR.rotation.x = -swing;
   p.root.position.y = Math.abs(Math.cos(gaitPhase)) * 0.035 * speed01;
   p.root.rotation.z = Math.sin(gaitPhase) * 0.02 * speed01 + stagger * Math.sin(stagger * 60) * 0.12;
-  p.weapon.position.z = 0.06 + attackT * 0.08;
-  p.weapon.rotation.x = -attackT * 0.18;
+  // 更明显的攻击动画
+  p.weapon.position.z = 0.06 + attackT * 0.22;
+  p.weapon.rotation.x = -attackT * 0.48;
+  p.root.rotation.x = attackT * 0.12;
 }

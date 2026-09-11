@@ -1,6 +1,11 @@
 import './style.css';
+import * as THREE from 'three';
 import { Game } from './game';
 import { Input } from './core/input';
+import { MainMenu } from './ui/menu';
+import { LobbyUI, type LobbyPlayer } from './ui/lobby';
+import { MultiplayerClient } from './net/ws-client';
+import { PvPGameWS } from './pvp/PvPGameWS';
 
 /* ---------- QA 参数 ---------- */
 function qaParams() {
@@ -33,14 +38,188 @@ const pauseScreen = document.getElementById('pause-screen')!;
 const input = new Input(sceneCanvas);
 const qa = qaParams();
 let game: Game | null = null;
+let pvpGame: PvPGameWS | null = null;
 let running = false;
 let paused = false;
 let lastT = performance.now();
+let mode: 'solo' | 'pvp' = 'solo';
+
+// 网络和大厅
+let net: MultiplayerClient | null = null;
+let lobby: LobbyUI | null = null;
+let lobbyPlayers = new Map<string, LobbyPlayer>();
 
 function setStage(s: string) { stageText.textContent = s; }
 
-game = new Game(sceneCanvas, hudCanvas, input, { qa, onStage: setStage });
-game.resize();
+/* ---------- 菜单系统 ---------- */
+let menu: MainMenu | null = null;
+
+function initMenu() {
+  menu = new MainMenu();
+  menu.onMenuAction(async (action, data) => {
+    try {
+      if (action === 'solo') {
+        mode = 'solo';
+        menu!.hide();
+        startSoloMode();
+      } else if (action === 'createRoom') {
+        mode = 'pvp';
+        menu!.showStatus('正在创建房间...');
+        net = new MultiplayerClient();
+        const code = await net.createRoom('Player');
+        menu!.hide();
+        showLobby(code, net.isHost);
+      } else if (action === 'joinRoom') {
+        mode = 'pvp';
+        menu!.showStatus('正在加入房间...');
+        net = new MultiplayerClient();
+        await net.joinRoom(data!, 'Player');
+        menu!.hide();
+        showLobby(data!, net.isHost);
+      }
+    } catch (err) {
+      showError('网络错误: ' + err);
+      menu!.showStatus('连接失败,请重试');
+    }
+  });
+}
+
+function startSoloMode() {
+  // 原有单人模式
+  if (!game) {
+    game = new Game(sceneCanvas, hudCanvas, input, { qa, onStage: setStage });
+    game.resize();
+  }
+  enterScreen.hidden = false;
+  enterScreen.addEventListener('click', enterSoloGame, { once: true });
+}
+
+async function enterSoloGame() {
+  if (!game) return;
+  await game.audio.resumeIfNeeded();
+  enterScreen.hidden = true;
+  const ok = await input.requestLock();
+  if (!ok) setStage('自由瞄准模式(无指针锁定)');
+  input.enabled = true;
+  running = true;
+  lastT = performance.now();
+}
+
+function setupLobbyActions() {
+  if (!lobby) return;
+  
+  lobby.onLobbyAction((action, data) => {
+    if (action === 'team') {
+      // 通知服务器队伍变更
+      net!.send({ type: 'team', team: data });
+    } else if (action === 'start' && net!.isHost) {
+      // 检查队伍
+      const teams = Array.from(lobbyPlayers.values()).map(p => p.team);
+      const hasRed = teams.includes('red');
+      const hasBlue = teams.includes('blue');
+      if (!hasRed || !hasBlue) {
+        lobby!.showStatus('需要至少两个队伍才能开始');
+        return;
+      }
+      
+      // 通知服务器开始对战
+      net!.send({ type: 'start' });
+    } else if (action === 'leave') {
+      // 返回菜单
+      lobby!.destroy();
+      lobby = null;
+      if (net) {
+        net.disconnect();
+        net = null;
+      }
+      lobbyPlayers.clear();
+      if (menu) {
+        menu.show();
+      }
+    }
+  });
+}
+
+function showLobby(code: string, isHost: boolean) {
+  lobby = new LobbyUI(code, isHost, net!.myId);
+  
+  // 设置消息处理
+  net!.onMessage = (msg) => handleLobbyMessage(msg);
+  
+  // 等待服务器的roster消息
+  lobby.updateRoster(lobbyPlayers);
+  
+  setupLobbyActions();
+}
+
+function handleLobbyMessage(msg: any) {
+  if (msg.type === 'roster') {
+    // 服务器发送的完整名单
+    lobbyPlayers.clear();
+    const players = msg.players as Array<{ id: string; name: string; team: any; ready: boolean }>;
+    for (const p of players) {
+      lobbyPlayers.set(p.id, p);
+    }
+    if (lobby) {
+      lobby.updateRoster(lobbyPlayers);
+    }
+  } else if (msg.type === 'start') {
+    // 对战开始
+    startPvPMatch();
+  } else if (msg.type === 'promoted') {
+    // 被提升为host
+    if (lobby) {
+      lobby.destroy();
+      lobby = new LobbyUI(net!.roomCode, true, net!.myId);
+      lobby.updateRoster(lobbyPlayers);
+      // 重新绑定lobby actions
+      setupLobbyActions();
+    }
+  } else if (msg.type === 'error') {
+    if (lobby) {
+      lobby.showStatus(msg.message || '错误');
+    }
+  }
+}
+
+function startPvPMatch() {
+  if (lobby) {
+    lobby.hide();
+  }
+  
+  // 初始化Game对象(用于arena和colliders)
+  if (!game) {
+    game = new Game(sceneCanvas, hudCanvas, input, { qa, onStage: setStage });
+    game.resize();
+  }
+  
+  // 创建PvP游戏实例
+  const myTeam = lobbyPlayers.get(net!.myId)!.team;
+  pvpGame = new PvPGameWS(net!, game, myTeam as 'red' | 'blue' | 'spectator');
+  
+  // 初始化远程玩家(从lobby名单)
+  for (const [id, player] of lobbyPlayers) {
+    if (id !== net!.myId && (player.team === 'red' || player.team === 'blue')) {
+      pvpGame.addRemotePlayer(id, player.name, player.team);
+    }
+  }
+  
+  // 启动游戏
+  enterScreen.hidden = true;
+  input.enabled = true;
+  running = true;
+  lastT = performance.now();
+  
+  // 开始对战
+  pvpGame.startMatch();
+  
+  // 锁定指针
+  (async () => {
+    await game!.audio.resumeIfNeeded();
+    const ok = await input.requestLock();
+    if (!ok) setStage('自由瞄准模式(无指针锁定)');
+  })();
+}
 
 /* ---------- capture API ---------- */
 const snapshots: string[] = [];
@@ -71,24 +250,14 @@ window.__bb = {
   state() { return { running, paused, t: game?.t, snapshots: snapshots.length }; },
 };
 
-/* ---------- 进入/暂停 ---------- */
-async function enterGame() {
-  if (!game) return;
-  enterScreen.hidden = true;
-  const ok = await input.requestLock();
-  if (!ok) setStage('自由瞄准模式(无指针锁定)');
-  input.enabled = true;
-  running = true;
-  lastT = performance.now();
-}
-enterScreen.addEventListener('click', enterGame);
+/* ---------- 暂停 ---------- */
 pauseScreen.addEventListener('click', async () => {
   paused = false; pauseScreen.hidden = true;
   const ok = await input.requestLock();
   if (!ok) input.fallbackAim = true;
 });
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape' && running && !paused) {
+  if (e.code === 'Escape' && running && !paused && mode === 'solo') {
     paused = true; pauseScreen.hidden = false; input.releaseLock();
   }
   if (e.code === 'KeyR' && game && (game.gameOver || game.victory)) {
@@ -98,38 +267,64 @@ document.addEventListener('keydown', (e) => {
 sceneCanvas.addEventListener('click', () => {
   if (game && (game.gameOver || game.victory)) location.reload();
 });
-document.addEventListener('pointerlockchange', () => {
-  // 锁定意外丢失时不立即暂停(fallback 可玩);Esc 由上面的 keydown 处理
-});
 
 /* ---------- 主循环 ---------- */
 function frame(now: number) {
   requestAnimationFrame(frame);
   const dt = Math.min((now - lastT) / 1000, 0.05);
   lastT = now;
-  if (game && running && !paused) {
+  
+  if (running && !paused) {
     input.sample();
-    game.update(dt);
+    
+    if (mode === 'solo' && game) {
+      game.update(dt);
+    } else if (mode === 'pvp' && pvpGame && game) {
+      // PvP uses PlayerController - just update and render
+      pvpGame.update(dt);
+      
+      // Use camera from PlayerController
+      const camera = pvpGame.getCamera();
+      game.renderer.render(game.scene, camera);
+      
+      // Simple HUD
+      const ctx = hudCanvas.getContext('2d')!;
+      ctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+      ctx.font = '24px "Comic Sans MS"';
+      ctx.fillStyle = '#29277f';
+      ctx.fillText(`红队: ${pvpGame.redScore}  蓝队: ${pvpGame.blueScore}`, 30, 50);
+      
+      ctx.fillText(`HP: ${Math.ceil(pvpGame.myHp)}  击杀: ${pvpGame.kills}`, 30, 90);
+      ctx.fillText(`队伍: ${pvpGame.myTeam === 'red' ? '红队' : '蓝队'}`, 30, 130);
+      
+      if (!pvpGame.myAlive && pvpGame.respawnTimer > 0) {
+        ctx.font = '48px "Comic Sans MS"';
+        ctx.fillStyle = '#d7304a';
+        ctx.textAlign = 'center';
+        ctx.fillText(`重生中... ${Math.ceil(pvpGame.respawnTimer)}`, hudCanvas.width / 2, hudCanvas.height / 2);
+        ctx.textAlign = 'left';
+      }
+    }
+    
     input.endFrame();
-  } else {
-    game?.update(0); // 保持渲染(进入屏背后场景可见)
+  } else if (game) {
+    game.update(0);
   }
 }
-requestAnimationFrame(frame);
 
 window.addEventListener('resize', () => game?.resize());
 
-if (qa.capture) {
-  // capture 模式:直接可截图,无需点击
-  enterScreen.hidden = true;
-  input.enabled = true;
-  running = true;
+// 启动
+if (qa.capture || qa.auto) {
+  // QA模式:直接进入单人
+  mode = 'solo';
+  startSoloMode();
+  if (qa.auto) {
+    enterSoloGame();
+  }
+} else {
+  // 正常模式:显示菜单
+  initMenu();
 }
-if (qa.auto) {
-  // auto 模式:无人值守跑完整仿真(无 pointer lock,fallback 可玩路径)
-  enterScreen.hidden = true;
-  input.enabled = true;
-  input.fallbackAim = true;
-  running = true;
-  lastT = performance.now();
-}
+
+requestAnimationFrame(frame);

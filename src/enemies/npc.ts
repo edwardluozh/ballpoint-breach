@@ -37,9 +37,15 @@ export interface NpcCtx {
   em: Emitter<GameEvents>;
   others: Npc[];
   now: number;
+  audio?: { play: (type: any, opts?: { gain?: number; pitch?: number }) => void };
+  spawns: THREE.Vector3[];
 }
 
 let nextId = 1;
+
+const _tempVec1 = new THREE.Vector3();
+const _tempVec2 = new THREE.Vector3();
+const _tempVec3 = new THREE.Vector3();
 
 export class Npc {
   readonly id = nextId++;
@@ -69,6 +75,8 @@ export class Npc {
   private losCache = false;
   private losTimer = 0;
   private wantMove = new THREE.Vector3();
+  private idleTimer = 0;
+  private lastProgressPos = new THREE.Vector3();
 
   constructor(cls: NpcClass, variantSeed: number, spawn: THREE.Vector3) {
     this.cls = cls;
@@ -77,15 +85,21 @@ export class Npc {
     this.hp = this.maxHp = CLASS_STATS[cls].hp;
     this.pos.copy(spawn);
     this.lastPos.copy(spawn);
+    this.lastProgressPos.copy(spawn);
     this.syncTransform();
   }
 
   get eyePos(): THREE.Vector3 {
-    return new THREE.Vector3(this.pos.x, this.pos.y + 1.85, this.pos.z);
+    return _tempVec1.set(this.pos.x, this.pos.y + 1.85, this.pos.z);
   }
   headWorld(out = new THREE.Vector3()): THREE.Vector3 {
     out.copy(this.model.headCenter).applyMatrix4(this.model.group.matrixWorld);
     return out;
+  }
+
+  get bodyRadius(): number {
+    // Heavy 更胖,Rusher 更瘦,匹配模型实际尺寸
+    return this.cls === 'heavy' ? 0.50 : this.cls === 'rusher' ? 0.38 : 0.44;
   }
 
   syncTransform() {
@@ -101,11 +115,12 @@ export class Npc {
     if (this.hp <= 0) {
       this.dead = true;
       this.deadTime = now;
-      em.emit('enemyDied', { enemy: this, impactDir: dir.clone().normalize(), head });
+      em.emit('enemyDied', { enemy: this, impactDir: _tempVec2.copy(dir).normalize(), head });
       return true;
     }
     // 击退 + 踉跄
-    this.vel.addScaledVector(dir.clone().setY(0).normalize(), head ? 3.4 : 2.1);
+    _tempVec2.copy(dir).setY(0).normalize();
+    this.vel.addScaledVector(_tempVec2, head ? 3.4 : 2.1);
     this.state = 'stagger';
     this.stateTimer = this.staggerT = head ? 0.34 : 0.22;
     return false;
@@ -125,17 +140,18 @@ export class Npc {
       if (this.stateTimer <= 0) this.state = 'seek';
     }
 
-    const toPlayer = new THREE.Vector3().subVectors(ctx.playerPos, this.pos);
-    const dist = toPlayer.length();
+    _tempVec1.subVectors(ctx.playerPos, this.pos);
+    const dist = _tempVec1.length();
 
     // 视线(0.15s 缓存:raycast 全盒遍历是主要逻辑开销)
     this.losTimer -= dt;
     if (this.losTimer <= 0) {
       this.losTimer = 0.15;
-      this.losCache = ctx.colliders.lineOfSight(
-        new THREE.Vector3(this.pos.x, this.pos.y + 1.6, this.pos.z), ctx.playerEye);
+      _tempVec2.set(this.pos.x, this.pos.y + 1.6, this.pos.z);
+      this.losCache = ctx.colliders.lineOfSight(_tempVec2, ctx.playerEye);
     }
     const los = this.losCache;
+    const toPlayer = _tempVec1;
 
     if (this.state !== 'stagger') {
       this.state = (dist <= st.range && los) ? 'combat' : 'seek';
@@ -149,12 +165,13 @@ export class Npc {
       this.yaw = Math.atan2(toPlayer.x, toPlayer.z);
       this.strafePhase += dt * 1.7;
       const strafeSign = Math.sin(this.strafePhase) > 0 ? 1 : -1;
-      const side = new THREE.Vector3(toPlayer.z, 0, -toPlayer.x).normalize();
+      _tempVec2.set(toPlayer.z, 0, -toPlayer.x).normalize();
       const desired = st.range > 6 ? st.range * 0.55 : 1.2;
       const fwdAmount = dist > desired ? 0.8 : dist < desired * 0.6 ? -0.5 : 0;
+      _tempVec3.copy(toPlayer).setY(0).normalize();
       this.wantMove
-        .addScaledVector(toPlayer.clone().setY(0).normalize(), fwdAmount)
-        .addScaledVector(side, strafeSign * 0.55);
+        .addScaledVector(_tempVec3, fwdAmount)
+        .addScaledVector(_tempVec2, strafeSign * 0.55);
       if (this.attackCooldown <= 0 && los) {
         this.attack(ctx, toPlayer);
       }
@@ -165,18 +182,18 @@ export class Npc {
       if (o === this || o.dead) continue;
       const d = this.pos.distanceTo(o.pos);
       if (d < 0.85 && d > 1e-4) {
-        this.wantMove.addScaledVector(
-          new THREE.Vector3().subVectors(this.pos, o.pos).setY(0).normalize(), (0.85 - d) * 2.2);
+        _tempVec2.subVectors(this.pos, o.pos).setY(0).normalize();
+        this.wantMove.addScaledVector(_tempVec2, (0.85 - d) * 2.2);
       }
     }
 
     // 移动 + 碰撞
     if (this.wantMove.lengthSq() > 1e-6) {
       const spd = st.speed * (this.state === 'stagger' ? 0.3 : 1);
-      const move = this.wantMove.clone().setY(0).normalize().multiplyScalar(spd * dt);
-      const applied = ctx.colliders.resolveHorizontal(this.pos, move, 0.33, 1.9);
+      _tempVec2.copy(this.wantMove).setY(0).normalize().multiplyScalar(spd * dt);
+      const applied = ctx.colliders.resolveHorizontal(this.pos, _tempVec2, 0.33, 1.9);
       // 卡死检测:请求移动但实际位移过小
-      const want = move.length(), got = applied.length();
+      const want = _tempVec2.length(), got = applied.length();
       if (want > 0.02 && got < want * 0.25) {
         this.stuckTimer += dt;
         if (this.stuckTimer > 0.45) {
@@ -200,9 +217,51 @@ export class Npc {
       this.pos.y = gh;
     }
 
+    // 硬边界containment:防止NPC跌落到arena外墙外
+    // 实际墙边界: x ∈ [-36, 36], z ∈ [-46, 32]
+    // 留1米安全距离,防止从高处边缘跌落墙外
+    const safeMargin = 1.0;
+    const xMin = -36 + safeMargin, xMax = 36 - safeMargin;
+    const zMin = -46 + safeMargin, zMax = 32 - safeMargin;
+    
+    // 如果越界,clamp回内部并停止移动
+    if (this.pos.x < xMin || this.pos.x > xMax || this.pos.z < zMin || this.pos.z > zMax) {
+      this.pos.x = THREE.MathUtils.clamp(this.pos.x, xMin, xMax);
+      this.pos.z = THREE.MathUtils.clamp(this.pos.z, zMin, zMax);
+      this.vel.set(0, 0, 0);
+      this.wantMove.set(0, 0, 0);
+      // 重新获取地面高度(可能被clamp到不同位置)
+      const newGh = ctx.colliders.groundHeight(this.pos.x, this.pos.z, this.pos.y + 0.4, 0.5);
+      this.pos.y = newGh;
+    }
+
     this.syncTransform();
     const speed01 = Math.min(1, this.wantMove.length());
     animateNpc(this.model, this.gait, speed01, this.attackAnimT, this.staggerT);
+
+    // 坠落或严重出界恢复(只在clamp失败或深度坠落时触发)
+    if (this.pos.y < -3 || Math.abs(this.pos.x) > 40 || Math.abs(this.pos.z) > 50) {
+      this.teleportToValid(ctx);
+      return;
+    }
+    
+    // 长时间无进展检测(15秒未移动显著距离)
+    // 但排除战斗/有LOS状态(玩家在附近时NPC停留是正常行为)
+    const progressDist = this.pos.distanceTo(this.lastProgressPos);
+    if (progressDist > 3) {
+      this.lastProgressPos.copy(this.pos);
+      this.idleTimer = 0;
+    } else if (this.state !== 'combat' && !this.losCache) {
+      // 只在非战斗且无视线时累计idle时间
+      this.idleTimer += dt;
+      if (this.idleTimer > 15) {
+        this.teleportToValid(ctx);
+        this.idleTimer = 0;
+      }
+    } else {
+      // 战斗中或有LOS时重置计时器
+      this.idleTimer = 0;
+    }
   }
 
   private attack(ctx: NpcCtx, toPlayer: THREE.Vector3) {
@@ -211,11 +270,14 @@ export class Npc {
     this.attackAnimT = 1;
     if (st.projectile) {
       const from = this.eyePos;
-      const to = ctx.playerEye.clone();
+      const to = _tempVec3.copy(ctx.playerEye);
       ctx.em.emit('enemyAttackProjectile', { from, to, dmg: st.dmg, enemy: this });
+      if (ctx.audio) ctx.audio.play('enemyShoot', { gain: 0.5 });
     } else {
       ctx.em.emit('enemyAttackMelee', { dmg: st.dmg, enemy: this });
-      ctx.em.emit('playerHit', { dmg: st.dmg, fromDir: toPlayer.clone().setY(0).normalize().negate() });
+      _tempVec3.copy(toPlayer).setY(0).normalize().negate();
+      ctx.em.emit('playerHit', { dmg: st.dmg, fromDir: _tempVec3 });
+      if (ctx.audio) ctx.audio.play('enemyMelee', { gain: 0.6 });
     }
   }
 
@@ -239,7 +301,8 @@ export class Npc {
       const node = ctx.nav.nodes[this.navPath[this.navIdx]];
       const np = node.pos;
       const flatD = Math.hypot(np.x - this.pos.x, np.z - this.pos.z);
-      const reachable = flatD < 1.6 || (flatD < 2.4 && ctx.colliders.lineOfSight(this.eyePos, np.clone().setY(np.y + 1.2)));
+      _tempVec2.copy(np).setY(np.y + 1.2);
+      const reachable = flatD < 1.6 || (flatD < 2.4 && ctx.colliders.lineOfSight(this.eyePos, _tempVec2));
       if (reachable && Math.abs(np.y - this.pos.y) < 2.6) {
         this.navIdx++;
         continue;
@@ -248,26 +311,81 @@ export class Npc {
       break;
     }
     if (!target) target = ctx.playerPos;
-    const dir = new THREE.Vector3().subVectors(target, this.pos).setY(0);
-    if (dir.lengthSq() > 1e-4) {
-      dir.normalize();
-      this.yaw = Math.atan2(dir.x, dir.z);
-      this.wantMove.copy(dir);
+    _tempVec2.subVectors(target, this.pos).setY(0);
+    if (_tempVec2.lengthSq() > 1e-4) {
+      _tempVec2.normalize();
+      this.yaw = Math.atan2(_tempVec2.x, _tempVec2.z);
+      this.wantMove.copy(_tempVec2);
     }
   }
 
-  /** 卡死恢复:放弃当前目标,选择确定性可行邻居或逃逸向 */
+  /** 卡死恢复:传送到安全的内部生成点,优先地面以避免跌落 */
+  private teleportToValid(ctx: NpcCtx) {
+    if (ctx.spawns.length === 0) return;
+    
+    // 优先选择地面spawns(y < 2),远离玩家
+    const groundSpawns = ctx.spawns.filter(sp => sp.y < 2);
+    const candidates = groundSpawns.length > 0 ? groundSpawns : ctx.spawns;
+    
+    // 找最远且安全的生成点
+    let best: THREE.Vector3 | null = null;
+    let bestScore = 0;
+    const pFlat = _tempVec1.set(ctx.playerPos.x, 0, ctx.playerPos.z);
+    
+    for (const sp of candidates) {
+      // 安全检查:生成点必须在arena内墙内
+      if (Math.abs(sp.x) > 35 || sp.z < -45 || sp.z > 31) continue;
+      
+      const spFlat = _tempVec2.set(sp.x, 0, sp.z);
+      const dist = pFlat.distanceTo(spFlat);
+      
+      // 评分:距离玩家远 + 地面优先
+      const heightPenalty = sp.y > 2 ? -5 : 0;
+      const score = dist + heightPenalty;
+      
+      if (score > bestScore && dist >= 10) {
+        bestScore = score;
+        best = sp;
+      }
+    }
+    
+    // 后备:如果没有找到理想点,选最远的安全点
+    if (!best) {
+      for (const sp of candidates) {
+        if (Math.abs(sp.x) > 35 || sp.z < -45 || sp.z > 31) continue;
+        const spFlat = _tempVec2.set(sp.x, 0, sp.z);
+        const dist = pFlat.distanceTo(spFlat);
+        if (dist > bestScore) {
+          bestScore = dist;
+          best = sp;
+        }
+      }
+    }
+    
+    if (best) {
+      this.pos.copy(best);
+      this.lastPos.copy(best);
+      this.lastProgressPos.copy(best);
+      this.vel.set(0, 0, 0);
+      this.state = 'seek';
+      this.navPath = [];
+      this.idleTimer = 0;
+    }
+  }
+
   private recoverStuck(ctx: NpcCtx) {
     this.navPath = [];
     // 确定性逃逸:与当前位置相对墙的法线合成的开阔向
-    const probe = new THREE.Vector3(Math.cos(this.id * 2.4), 0, Math.sin(this.id * 2.4));
+    const yAxis = _tempVec3.set(0, 1, 0);
+    _tempVec1.set(Math.cos(this.id * 2.4), 0, Math.sin(this.id * 2.4));
     for (let i = 0; i < 4; i++) {
-      const dir = probe.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), i * Math.PI / 2);
-      const hit = ctx.colliders.raycast(
-        new THREE.Vector3(this.pos.x, this.pos.y + 0.9, this.pos.z), dir, 2.2);
+      _tempVec2.copy(_tempVec1).applyAxisAngle(yAxis, i * Math.PI / 2);
+      const rayOrigin = this.pos.clone();
+      rayOrigin.y += 0.9;
+      const hit = ctx.colliders.raycast(rayOrigin, _tempVec2, 2.2);
       if (!hit) {
-        this.wantMove.copy(dir);
-        this.pos.addScaledVector(dir, 0.05); // 轻推脱离穿透
+        this.wantMove.copy(_tempVec2);
+        this.pos.addScaledVector(_tempVec2, 0.05);
         return;
       }
     }
@@ -288,8 +406,11 @@ interface Projectile {
   trail: THREE.Vector3[];
 }
 
-const projMatRed = new THREE.LineBasicMaterial({ color: PAL.red, transparent: true, opacity: 0.95 });
-const projMatInk = new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 0.95 });
+const projMatRed = new THREE.LineBasicMaterial({ color: PAL.red, transparent: true, opacity: 1.0, linewidth: 2 });
+const projMatInk = new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 1.0, linewidth: 2 });
+
+const _projTemp1 = new THREE.Vector3();
+const _projTemp2 = new THREE.Vector3();
 
 export class ProjectilePool {
   private items: Projectile[] = [];
@@ -366,25 +487,28 @@ export class ProjectilePool {
       attr.needsUpdate = true;
 
       // 撞墙
-      const hit = ctx.colliders.raycast(p.pos.clone().addScaledVector(p.vel, -dt), p.vel.clone().normalize(), p.vel.length() * dt + 0.1);
+      _projTemp1.copy(p.pos).addScaledVector(p.vel, -dt);
+      _projTemp2.copy(p.vel).normalize();
+      const hit = ctx.colliders.raycast(_projTemp1, _projTemp2, p.vel.length() * dt + 0.1);
       if (hit && hit.box.tag !== 'rail') { this.kill(p); continue; }
 
       if (p.fromEnemy) {
-        const pc = new THREE.Vector3(ctx.playerPos.x, ctx.playerPos.y + 1.0, ctx.playerPos.z);
+        _projTemp1.set(ctx.playerPos.x, ctx.playerPos.y + 1.0, ctx.playerPos.z);
         // 武士刀格挡反弹:弹在近处且来向在玩家视线前方
-        if (ctx.playerBlocks && p.pos.distanceTo(pc) < 1.9) {
-          const toBullet = p.vel.clone().normalize().negate();
-          if (toBullet.dot(ctx.playerBlockDir) > 0.35) {
-            this.reflect(p, toBullet);
+        if (ctx.playerBlocks && p.pos.distanceTo(_projTemp1) < 1.9) {
+          _projTemp2.copy(p.vel).normalize().negate();
+          if (_projTemp2.dot(ctx.playerBlockDir) > 0.35) {
+            this.reflect(p, _projTemp2);
             continue;
           }
         }
         // 打玩家(球近似)
-        if (p.pos.distanceTo(pc) < 0.62) {
+        if (p.pos.distanceTo(_projTemp1) < 0.62) {
           this.kill(p);
+          _projTemp2.copy(p.vel).setY(0).normalize();
           ctx.em.emit('playerHit', {
             dmg: p.dmg,
-            fromDir: p.vel.clone().setY(0).normalize(),
+            fromDir: _projTemp2,
           });
           continue;
         }
@@ -392,10 +516,12 @@ export class ProjectilePool {
         // 反弹后打敌人
         for (const e of ctx.enemies) {
           if (e.dead) continue;
-          const c = new THREE.Vector3(e.pos.x, e.pos.y + 1.15, e.pos.z);
-          if (p.pos.distanceTo(c) < 0.62) {
+          _projTemp1.set(e.pos.x, e.pos.y + 1.15, e.pos.z);
+          const hitDist = e.bodyRadius + 0.15; // 使用动态半径
+          if (p.pos.distanceTo(_projTemp1) < hitDist) {
             this.kill(p);
-            e.takeHit(p.dmg * 1.6, p.vel.clone().normalize(), false, ctx.em);
+            _projTemp2.copy(p.vel).normalize();
+            e.takeHit(p.dmg * 1.6, _projTemp2, false, ctx.em);
             ctx.em.emit('killFeed', { text: '反弹击中 +150', points: 150 });
             break;
           }

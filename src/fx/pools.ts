@@ -31,14 +31,17 @@ export class FxPool {
   private group = new THREE.Group();
 
   constructor(casingMax = 48, itemMax = 96) {
-    // 弹壳:小矩形线框(2.5mm 比例放大到 0.018)
+    // 弹壳:更可见的立体外壳(放大3倍,金色)
     for (let i = 0; i < casingMax; i++) {
       const g = new THREE.BufferGeometry();
-      const s = 0.009;
+      const s = 0.026;
+      const h = 0.045;
       g.setAttribute('position', new THREE.Float32BufferAttribute([
-        -s, -s * 2, 0, s, -s * 2, 0, s, s * 2, 0, -s, s * 2, 0, -s, -s * 2, 0,
+        -s, -h, 0, s, -h, 0,  s, -h, 0, s, h, 0,  s, h, 0, -s, h, 0,  -s, h, 0, -s, -h, 0,
+        -s, -h, 0.01, s, -h, 0.01,  s, -h, 0.01, s, h, 0.01,  s, h, 0.01, -s, h, 0.01,  -s, h, 0.01, -s, -h, 0.01,
+        -s, -h, 0, -s, -h, 0.01,  s, -h, 0, s, -h, 0.01,  s, h, 0, s, h, 0.01,  -s, h, 0, -s, h, 0.01,
       ], 3));
-      const mesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x8a6d2f, transparent: true, opacity: 0.9 }));
+      const mesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xd4a857, transparent: true, opacity: 0.95 }));
       mesh.visible = false;
       this.group.add(mesh);
       this.casings.push({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), spin: new THREE.Vector3(), rot: new THREE.Euler(), life: 0, mesh });
@@ -59,11 +62,11 @@ export class FxPool {
     if (!c) return;
     c.alive = true;
     c.pos.copy(pos);
-    c.vel.copy(dir).multiplyScalar(1.6 + rng.next() * 1.2);
-    c.vel.y = 1.7 + rng.next() * 1.1;
-    c.spin.set(rng.range(-14, 14), rng.range(-10, 10), rng.range(-14, 14));
+    c.vel.copy(dir).multiplyScalar(2.4 + rng.next() * 1.6);
+    c.vel.y = 2.2 + rng.next() * 1.4;
+    c.spin.set(rng.range(-18, 18), rng.range(-14, 14), rng.range(-18, 18));
     c.rot.set(rng.next() * 6, rng.next() * 6, rng.next() * 6);
-    c.life = 2.6;
+    c.life = 3.5;
     c.mesh.visible = true;
   }
 

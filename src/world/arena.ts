@@ -267,27 +267,26 @@ export function buildArena(): Arena {
     const end = start.clone().addScaledVector(dir, boomLen);
     const boomGeo = new THREE.BoxGeometry(0.55, 0.55, boomLen);
     const mid = start.clone().lerp(end, 0.5);
-    const boomMesh = new THREE.Mesh(boomGeo, sharedPenFill(610, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }));
-    boomMesh.position.copy(mid);
-    boomMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
-    group.add(boomMesh);
-    const boomEdges = makePenOutline(new THREE.BoxGeometry(0.55, 0.55, boomLen), { seed: 611, color: 0x9a6d20 });
-    boomEdges.position.copy(mid);
-    boomEdges.quaternion.copy(boomMesh.quaternion);
-    group.add(boomEdges);
+    boomGeo.translate(mid.x, mid.y, mid.z);
+    boomGeo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir));
+    collectStatic(boomGeo, 'crane610|ochre', () => sharedPenFill(610, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }),
+      { seed: 611, color: 0x9a6d20 });
     const braceGeo = new THREE.BoxGeometry(0.14, 0.14, 7.5);
     const braceMid = start.clone().addScaledVector(dir, 4.2).add(new THREE.Vector3(0, -1.7, 0));
-    const brace = new THREE.Mesh(braceGeo, sharedPenFill(612, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }));
-    brace.position.copy(braceMid);
-    brace.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(-0.55, -0.62, -0.55).normalize());
-    group.add(brace);
+    braceGeo.translate(braceMid.x, braceMid.y, braceMid.z);
+    braceGeo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(-0.55, -0.62, -0.55).normalize()));
+    collectStatic(braceGeo, 'crane612|ochre', () => sharedPenFill(612, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }),
+      { seed: 613, color: 0x9a6d20 });
     const hookAt = start.clone().lerp(end, 0.55).setY(6.4);
-    const cableGeo = new THREE.BufferGeometry().setFromPoints([start.clone().lerp(end, 0.55), hookAt.clone().setY(6.4)]);
-    group.add(new THREE.Line(cableGeo, new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 0.8 })));
-    const hook = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.09, 6, 10), sharedPenFill(615, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }));
-    hook.position.copy(hookAt).setY(6.2);
-    hook.rotation.x = Math.PI / 2;
-    group.add(hook);
+    const cableLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([start.clone().lerp(end, 0.55), hookAt.clone().setY(6.4)]),
+      new THREE.LineBasicMaterial({ color: PAL.ink, transparent: true, opacity: 0.8 }));
+    group.add(cableLine);
+    const hookGeo = new THREE.TorusGeometry(0.32, 0.09, 6, 10);
+    hookGeo.translate(hookAt.x, 6.2, hookAt.z);
+    hookGeo.rotateX(Math.PI / 2);
+    collectStatic(hookGeo, 'crane615|ochre', () => sharedPenFill(615, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }),
+      { seed: 616, color: 0x9a6d20 });
   }
 
   /* ============ F. 周墙/门/barricade/补给/锚点/出生点 ============ */
@@ -317,12 +316,10 @@ export function buildArena(): Arena {
   barricadeAt(31.4, -12, 3.6, 'z');
 
   const supplyAt = (x: number, y: number, z: number, kind: 'hp' | 'ammo') => {
-    // 动态件(拾取后隐藏)
     const g = new THREE.BoxGeometry(0.5, 0.5, 0.5);
     g.translate(x, y + 0.27, z);
-    const m = new THREE.Mesh(g, sharedPenFill(740 + points.supplies.length, { density: 0.9, paper: 0xd8f0de, hatch: 0x5a9a72 }));
-    group.add(m);
-    group.add(makePenOutline(g, { seed: 750 + points.supplies.length, color: 0x3f7a58 }));
+    collectStatic(g, 'supply|green', () => sharedPenFill(740, { density: 0.9, paper: 0xd8f0de, hatch: 0x5a9a72 }),
+      { seed: 750 + points.supplies.length, color: 0x3f7a58 });
     points.supplies.push({ pos: new THREE.Vector3(x, y, z), kind });
   };
   supplyAt(-30, 0, 20, 'hp'); supplyAt(12, 0, -6, 'hp'); supplyAt(30, 5, -44, 'hp');
@@ -331,9 +328,8 @@ export function buildArena(): Arena {
   const anchorAt = (x: number, y: number, z: number) => {
     const g = new THREE.TorusGeometry(0.42, 0.1, 6, 12);
     g.translate(x, y, z);
-    const m = new THREE.Mesh(g, sharedPenFill(760 + points.grappleAnchors.length, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }));
-    group.add(m);
-    group.add(makePenOutline(g, { seed: 770 + points.grappleAnchors.length, color: 0x9a6d20, thresholdAngle: 40 }));
+    collectStatic(g, 'anchor|ochre', () => sharedPenFill(760, { density: 1, paper: 0xe8cf9e, hatch: 0xb07f2e }),
+      { seed: 770 + points.grappleAnchors.length, color: 0x9a6d20, threshold: 40 });
     points.grappleAnchors.push(new THREE.Vector3(x, y, z));
   };
   anchorAt(-10, 5.9, -38.3); anchorAt(15, 5.9, -38.3);

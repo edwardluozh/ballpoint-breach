@@ -33,6 +33,7 @@ export interface WeaponSystemCtx {
   playerPos: THREE.Vector3;
   grappleAnchors: THREE.Vector3[];
   boss: HittableBoss | null;
+  audio?: { play: (type: any, opts?: { gain?: number; pitch?: number }) => void };
 }
 
 type SlashPhase = 'idle' | 'windup' | 'contact' | 'follow' | 'recovery';
@@ -114,6 +115,7 @@ export class WeaponSystem {
         const need = d.magSize - a.inMag;
         const take = Math.min(need, a.reserve);
         a.inMag += take; a.reserve -= take;
+        if (this.ctx.audio && take > 0) this.ctx.audio.play('reload', { gain: 0.5 });
       }
     }
 
@@ -207,6 +209,12 @@ export class WeaponSystem {
     this.recoil = Math.min(1, this.recoil + d.recoilKick * 3);
     this.recoilCam += d.recoilCam;
     this.ejectPending = d.ejectAt;
+    
+    if (this.ctx.audio) {
+      const sfxMap: Record<string, string> = { pistol: 'pistol', rifle: 'rifle', shotgun: 'shotgun', sniper: 'sniper' };
+      const sfx = sfxMap[this.current] || 'pistol';
+      this.ctx.audio.play(sfx as any, { gain: 0.8, pitch: 0.95 + Math.random() * 0.1 });
+    }
 
     const vm = this.vms[this.current];
     const muzzleWorld = new THREE.Vector3();
@@ -249,13 +257,13 @@ export class WeaponSystem {
     let head = false;
     for (const e of enemies) {
       if (e.dead) continue;
-      // 头
+      // 头(扩大判定 +20%)
       const headC = e.headWorld();
-      const hd = raySphere(origin, dir, headC, e.model.headRadius * 1.15);
-      // 身(胶囊:肚中心±0.6)
+      const hd = raySphere(origin, dir, headC, e.model.headRadius * 1.2);
+      // 身(胶囊:肚中心±0.6,使用动态半径)
       const bodyA = new THREE.Vector3(e.pos.x, e.pos.y + 0.5, e.pos.z);
       const bodyB = new THREE.Vector3(e.pos.x, e.pos.y + 1.5, e.pos.z);
-      const bd = rayCapsule(origin, dir, bodyA, bodyB, 0.42);
+      const bd = rayCapsule(origin, dir, bodyA, bodyB, e.bodyRadius);
       const hitD = hd !== null && (bd === null || hd <= bd) ? hd : bd;
       const isHead = hitD !== null && hd !== null && hitD === hd;
       if (hitD !== null && hitD < bestDist) {
@@ -327,6 +335,7 @@ export class WeaponSystem {
     const { camera, enemies, em, fx, playerPos } = this.ctx;
     const dir = this.lookDir();
     const flat = dir.clone().setY(0).normalize();
+    if (this.ctx.audio) this.ctx.audio.play('katana', { gain: 0.6, pitch: 0.9 + Math.random() * 0.2 });
     fx.spawnSlashArc(
       new THREE.Vector3(playerPos.x, playerPos.y + 1.3, playerPos.z),
       flat, this.slashReverse,

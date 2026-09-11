@@ -15,6 +15,8 @@ import { SLOT_ORDER, WEAPONS } from './weapons/defs';
 import { FxPool } from './fx/pools';
 import { DeathInkSystem } from './fx/deathInk';
 import { Hud, type HudState } from './hud/hud';
+import { AudioSystem } from './audio/audio';
+import { PickupPool } from './fx/pickups';
 
 export interface GameOpts {
   qa: { capture?: boolean; stress?: boolean; ink?: boolean; view?: string; auto?: boolean };
@@ -36,7 +38,9 @@ export class Game {
   weapons: WeaponSystem;
   fx: FxPool;
   deathInk = new DeathInkSystem();
+  pickups: PickupPool;
   hud: Hud;
+  audio = new AudioSystem();
   banner: { text: string; sub: string; t: number } | null = null;
   hint = 'WASD 移动 · 按 1-5 切换武器';
   boss: Boss | null = null;
@@ -63,8 +67,13 @@ export class Game {
   };
 
   constructor(canvas: HTMLCanvasElement, hudCanvas: HTMLCanvasElement, input: Input, public opts: GameOpts) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    this.renderer = new THREE.WebGLRenderer({ 
+      canvas, 
+      antialias: false, 
+      powerPreference: 'high-performance',
+      stencil: false
+    });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
     this.renderer.setClearColor(PAL.paperCool, 1);
 
     this.camera = new THREE.PerspectiveCamera(75, 1, 0.08, 400);
@@ -80,10 +89,12 @@ export class Game {
     this.scene.add(this.projectiles.object);
 
     this.player = new PlayerController(this.arena.colliders, input);
+    this.player.audio = this.audio;
 
     this.fx = new FxPool();
     this.scene.add(this.fx.object);
     this.scene.add(this.deathInk.object);
+    this.pickups = new PickupPool(this.scene);
     this.weapons = new WeaponSystem({
       camera: this.camera,
       input,
@@ -95,6 +106,7 @@ export class Game {
       playerPos: this.player.state.pos,
       grappleAnchors: this.arena.points.grappleAnchors,
       boss: null,
+      audio: this.audio,
     });
     this.camera.add(this.weapons.object);
     this.scene.add(this.camera);   // camera 子级(viewmodel)需要 camera 在场景内
@@ -108,14 +120,34 @@ export class Game {
       () => this.spawnBoss(),
       () => { this.victory = true; },
     );
+    this.waves.setWaveClearCallback(() => {
+      // 波次清除奖励:1-2个生命包
+      const count = 1 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < count; i++) {
+        const sp = this.arena.points.enemySpawns[Math.floor(Math.random() * this.arena.points.enemySpawns.length)];
+        this.pickups.spawn('health', sp.clone());
+      }
+      // 弹药包
+      for (let i = 0; i < 2; i++) {
+        const sp = this.arena.points.enemySpawns[Math.floor(Math.random() * this.arena.points.enemySpawns.length)];
+        this.pickups.spawn('ammo', sp.clone());
+      }
+    });
 
     // 事件接线
     this.em.on('enemyDied', ({ enemy, head, impactDir }) => {
       const st = CLASS_STATS[enemy.cls];
       this.combo += 1; this.comboTimer = 4;
-      const pts = Math.round(st.score * (head ? 2 : 1) * (1 + (this.combo - 1) * 0.1));
+      const pts = Math.round(st.score * (head ? 2.4 : 1) * (1 + (this.combo - 1) * 0.1));
       this.score += pts;
-      this.killFeed.push({ text: `${head ? '爆头' : st.label} +${pts}`, points: pts, t: 3 });
+      if (head) {
+        this.killFeed.push({ text: `💥 爆头 +${pts}`, points: pts, t: 3.5 });
+        this.audio.play('headshot', { gain: 0.9 });
+        this.audio.play('death', { gain: 0.4, pitch: 1.2 });
+      } else {
+        this.killFeed.push({ text: `${st.label} +${pts}`, points: pts, t: 3 });
+        this.audio.play('death', { gain: 0.6, pitch: 0.9 + Math.random() * 0.3 });
+      }
       // 死亡墨水:剪影+碎片+地面/墙面沉积
       const hit = this.arena.colliders.raycast(
         new THREE.Vector3(enemy.pos.x, enemy.pos.y + 1.2, enemy.pos.z), impactDir, 3.5);
@@ -128,6 +160,14 @@ export class Game {
       this.scene.remove(enemy.model.group);
       const idx = this.npcs.indexOf(enemy);
       if (idx >= 0) this.npcs.splice(idx, 1);
+      
+      // 掉落物(30%弹药, 15%生命)
+      const r = Math.random();
+      if (r < 0.30) {
+        this.pickups.spawn('ammo', enemy.pos.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      } else if (r < 0.45) {
+        this.pickups.spawn('health', enemy.pos.clone().add(new THREE.Vector3(0, 0.5, 0)));
+      }
     });
     this.em.on('enemyAttackProjectile', ({ from, to, dmg, enemy }) => {
       const dir = new THREE.Vector3().subVectors(to, from).normalize();
@@ -140,6 +180,7 @@ export class Game {
       this.hp -= dmg;
       this.hurt = Math.min(1, this.hurt + 0.38);
       this.hurtDir.copy(fromDir);
+      this.audio.play('hurt', { gain: 0.7 });
       if (this.hp <= 0) { this.hp = 0; this.gameOver = true; }
     });
     this.em.on('killFeed', ({ text, points }) => {
@@ -277,7 +318,7 @@ export class Game {
   private step(dt: number) {
     if (!this.gameOver && !this.victory) {
       this.player.update(dt);
-      this.waves.update(dt, this.npcs.length);
+      this.waves.update(dt, this.npcs.length, this.player.state.pos);
       this.weapons.update(dt, this.player.state.gaitPhase, this.player.state.sprinting);
       // 相机后坐
       const rc = this.weapons.consumeRecoilCam();
@@ -297,6 +338,8 @@ export class Game {
       nav: this.nav,
       em: this.em,
       others: this.npcs,
+      audio: this.audio,
+      spawns: this.arena.points.enemySpawns,
     };
     for (const n of this.npcs) n.update(ctx);
 
@@ -349,6 +392,24 @@ export class Game {
     // FX
     this.fx.update(dt, (x, z) => this.arena.colliders.groundHeight(x, z, 8, 0.5));
     this.deathInk.update(dt, (x, z) => this.arena.colliders.groundHeight(x, z, 8, 0.5));
+    this.pickups.update(dt, this.player.state.pos, (type) => {
+      if (type === 'ammo') {
+        // 补充所有武器后备弹药(30-50%)
+        for (const id of SLOT_ORDER) {
+          if (id === 'katana') continue;
+          const d = WEAPONS[id];
+          const a = this.weapons.ammo[id];
+          const refill = Math.floor(d.reserveMax * (0.3 + Math.random() * 0.2));
+          a.reserve = Math.min(d.reserveMax, a.reserve + refill);
+        }
+        this.audio.play('reload', { gain: 0.5, pitch: 1.2 });
+      } else if (type === 'health') {
+        const heal = 25 + Math.floor(Math.random() * 16); // 25-40
+        this.hp = Math.min(this.hpMax, this.hp + heal);
+        this.em.emit('playerHeal', { amount: heal });
+        this.audio.play('jump', { gain: 0.6, pitch: 1.4 });
+      }
+    });
 
     // 波间恢复
     if (this.waves.state.intermission > 5.9) {

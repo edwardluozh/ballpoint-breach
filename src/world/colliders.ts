@@ -9,9 +9,17 @@ export interface Box {
   tag?: 'solid' | 'step' | 'barricade' | 'rail';
 }
 
+/** 均匀网格空间哈希(broadphase) */
+interface SpatialGrid {
+  cellSize: number;
+  cells: Map<string, Box[]>;
+}
+
 export class ColliderWorld {
   boxes: Box[] = [];
   private barricades: Box[] = [];
+  private grid: SpatialGrid = { cellSize: 8, cells: new Map() };
+  private gridDirty = false;
 
   addBox(center: THREE.Vector3, size: THREE.Vector3, tag: Box['tag'] = 'solid'): Box {
     const b: Box = {
@@ -20,21 +28,59 @@ export class ColliderWorld {
       tag,
     };
     this.boxes.push(b);
+    this.gridDirty = true;
     return b;
   }
 
-  addBarricade(b: Box) { this.barricades.push(b); this.boxes.push(b); }
+  addBarricade(b: Box) { this.barricades.push(b); this.boxes.push(b); this.gridDirty = true; }
   removeBarricade(b: Box) {
     const i = this.barricades.indexOf(b);
     if (i >= 0) this.barricades.splice(i, 1);
     const j = this.boxes.indexOf(b);
     if (j >= 0) this.boxes.splice(j, 1);
+    this.gridDirty = true;
+  }
+
+  private rebuildGrid() {
+    this.grid.cells.clear();
+    for (const b of this.boxes) {
+      const minCx = Math.floor(b.min.x / this.grid.cellSize);
+      const maxCx = Math.floor(b.max.x / this.grid.cellSize);
+      const minCz = Math.floor(b.min.z / this.grid.cellSize);
+      const maxCz = Math.floor(b.max.z / this.grid.cellSize);
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cz = minCz; cz <= maxCz; cz++) {
+          const key = `${cx},${cz}`;
+          let cell = this.grid.cells.get(key);
+          if (!cell) { cell = []; this.grid.cells.set(key, cell); }
+          cell.push(b);
+        }
+      }
+    }
+    this.gridDirty = false;
+  }
+
+  private queryGrid(minX: number, maxX: number, minZ: number, maxZ: number): Box[] {
+    if (this.gridDirty) this.rebuildGrid();
+    const result = new Set<Box>();
+    const minCx = Math.floor(minX / this.grid.cellSize);
+    const maxCx = Math.floor(maxX / this.grid.cellSize);
+    const minCz = Math.floor(minZ / this.grid.cellSize);
+    const maxCz = Math.floor(maxZ / this.grid.cellSize);
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const cell = this.grid.cells.get(`${cx},${cz}`);
+        if (cell) cell.forEach((b) => result.add(b));
+      }
+    }
+    return Array.from(result);
   }
 
   /** 点下方最近支撑面高度(含 y=0 地面);top 表面可站 */
   groundHeight(x: number, z: number, fromY: number, tolerance = 0.55): number {
     let best = 0;
-    for (const b of this.boxes) {
+    const candidates = this.queryGrid(x, x, z, z);
+    for (const b of candidates) {
       if (x < b.min.x || x > b.max.x || z < b.min.z || z > b.max.z) continue;
       const top = b.max.y;
       if (top <= fromY + tolerance && top > best) best = top;
@@ -63,7 +109,8 @@ export class ColliderWorld {
   }
 
   private pushOut(pos: THREE.Vector3, r: number, h: number, axis: 0 | 2) {
-    for (const b of this.boxes) {
+    const candidates = this.queryGrid(pos.x - r, pos.x + r, pos.z - r, pos.z + r);
+    for (const b of candidates) {
       // 垂直重叠检查(实体或非 step 顶面承载由 groundHeight 处理)
       if (pos.y + h <= b.min.y + 0.02 || pos.y + 0.45 >= b.max.y) {
         // 站在顶面上时,侧面不推(允许走上 step)
