@@ -245,13 +245,45 @@ export class PvPGameWS {
     const eyePos = this.localController.eyePos();
     const lookDir = this.localController.lookDir();
     
-    this.net.send({
-      type: 'shoot',
+    const shootData = {
       origin: { x: eyePos.x, y: eyePos.y, z: eyePos.z },
       dir: { x: lookDir.x, y: lookDir.y, z: lookDir.z },
       weaponId: this.weapons.current,
       damage: this.weapons.def.damage,
+    };
+    
+    // If host, process hit detection locally (host-authoritative)
+    if (this.net.isHost) {
+      this.processHostShoot(shootData.origin, shootData.dir, shootData.damage);
+    }
+    
+    // Send to server for broadcast/forwarding
+    this.net.send({
+      type: 'shoot',
+      ...shootData,
     });
+  }
+  
+  // Host-authoritative hit detection for local host shots
+  private processHostShoot(originData: any, dirData: any, damage: number) {
+    const origin = new THREE.Vector3(originData.x, originData.y, originData.z);
+    const dir = new THREE.Vector3(dirData.x, dirData.y, dirData.z).normalize();
+    
+    // Check all remote players (host cannot damage self)
+    for (const [id, rp] of this.remotePlayers) {
+      if (!rp.alive) continue;
+      const dist = this.raycastPlayer(origin, dir, rp.pos);
+      if (dist !== null && dist < 100) {
+        rp.hp -= damage;
+        if (rp.hp <= 0) {
+          rp.alive = false;
+          this.kills++; // Host got a kill
+          // Broadcast kill to all clients
+          this.net.send({ type: 'kill', victim: id, killer: this.net.myId });
+        }
+        break; // Only hit first player in ray path
+      }
+    }
   }
 
   private broadcastState() {
@@ -340,7 +372,7 @@ export class PvPGameWS {
           const origin = new THREE.Vector3(msg.origin.x, msg.origin.y, msg.origin.z);
           const dir = new THREE.Vector3(msg.dir.x, msg.dir.y, msg.dir.z).normalize();
           
-          // Check local player hit
+          // Check local player (host) hit by remote shooter
           if (this.myAlive && this.localController) {
             const dist = this.raycastPlayer(origin, dir, this.localController.state.pos);
             if (dist !== null && dist < 100) {
@@ -352,10 +384,11 @@ export class PvPGameWS {
                 // Notify shooter of kill
                 this.net.send({ type: 'kill', victim: this.net.myId, killer: msg.playerId });
               }
+              break; // Hit, stop checking
             }
           }
           
-          // Check other remote players
+          // Check other remote players hit by remote shooter
           for (const [id, rp] of this.remotePlayers) {
             if (id === msg.playerId || !rp.alive) continue;
             const dist = this.raycastPlayer(origin, dir, rp.pos);
@@ -366,6 +399,7 @@ export class PvPGameWS {
                 // Notify of kill
                 this.net.send({ type: 'kill', victim: id, killer: msg.playerId });
               }
+              break; // Hit, stop checking
             }
           }
         }
