@@ -217,12 +217,30 @@ export class Npc {
       this.pos.y = gh;
     }
 
+    // 硬边界containment:防止NPC跌落到arena外墙外
+    // 实际墙边界: x ∈ [-36, 36], z ∈ [-46, 32]
+    // 留1米安全距离,防止从高处边缘跌落墙外
+    const safeMargin = 1.0;
+    const xMin = -36 + safeMargin, xMax = 36 - safeMargin;
+    const zMin = -46 + safeMargin, zMax = 32 - safeMargin;
+    
+    // 如果越界,clamp回内部并停止移动
+    if (this.pos.x < xMin || this.pos.x > xMax || this.pos.z < zMin || this.pos.z > zMax) {
+      this.pos.x = THREE.MathUtils.clamp(this.pos.x, xMin, xMax);
+      this.pos.z = THREE.MathUtils.clamp(this.pos.z, zMin, zMax);
+      this.vel.set(0, 0, 0);
+      this.wantMove.set(0, 0, 0);
+      // 重新获取地面高度(可能被clamp到不同位置)
+      const newGh = ctx.colliders.groundHeight(this.pos.x, this.pos.z, this.pos.y + 0.4, 0.5);
+      this.pos.y = newGh;
+    }
+
     this.syncTransform();
     const speed01 = Math.min(1, this.wantMove.length());
     animateNpc(this.model, this.gait, speed01, this.attackAnimT, this.staggerT);
 
-    // 坠落或出界恢复
-    if (this.pos.y < -5 || Math.abs(this.pos.x) > 38 || Math.abs(this.pos.z) > 48) {
+    // 坠落或严重出界恢复(只在clamp失败或深度坠落时触发)
+    if (this.pos.y < -3 || Math.abs(this.pos.x) > 40 || Math.abs(this.pos.z) > 50) {
       this.teleportToValid(ctx);
       return;
     }
@@ -301,32 +319,44 @@ export class Npc {
     }
   }
 
-  /** 卡死恢复:放弃当前目标,选择确定性可行邻居或逃逸向 */
+  /** 卡死恢复:传送到安全的内部生成点,优先地面以避免跌落 */
   private teleportToValid(ctx: NpcCtx) {
-    // 传送到远离玩家的生成点(最小距离 12-18m)
     if (ctx.spawns.length === 0) return;
     
-    // 找最远生成点
+    // 优先选择地面spawns(y < 2),远离玩家
+    const groundSpawns = ctx.spawns.filter(sp => sp.y < 2);
+    const candidates = groundSpawns.length > 0 ? groundSpawns : ctx.spawns;
+    
+    // 找最远且安全的生成点
     let best: THREE.Vector3 | null = null;
-    let bestDist = 0;
+    let bestScore = 0;
     const pFlat = _tempVec1.set(ctx.playerPos.x, 0, ctx.playerPos.z);
     
-    for (const sp of ctx.spawns) {
+    for (const sp of candidates) {
+      // 安全检查:生成点必须在arena内墙内
+      if (Math.abs(sp.x) > 35 || sp.z < -45 || sp.z > 31) continue;
+      
       const spFlat = _tempVec2.set(sp.x, 0, sp.z);
       const dist = pFlat.distanceTo(spFlat);
-      if (dist > bestDist && dist >= 12) {
-        bestDist = dist;
+      
+      // 评分:距离玩家远 + 地面优先
+      const heightPenalty = sp.y > 2 ? -5 : 0;
+      const score = dist + heightPenalty;
+      
+      if (score > bestScore && dist >= 10) {
+        bestScore = score;
         best = sp;
       }
     }
     
-    // 如果没有远点,选最远的
+    // 后备:如果没有找到理想点,选最远的安全点
     if (!best) {
-      for (const sp of ctx.spawns) {
+      for (const sp of candidates) {
+        if (Math.abs(sp.x) > 35 || sp.z < -45 || sp.z > 31) continue;
         const spFlat = _tempVec2.set(sp.x, 0, sp.z);
         const dist = pFlat.distanceTo(spFlat);
-        if (dist > bestDist) {
-          bestDist = dist;
+        if (dist > bestScore) {
+          bestScore = dist;
           best = sp;
         }
       }
