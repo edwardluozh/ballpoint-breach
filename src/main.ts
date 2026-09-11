@@ -287,15 +287,47 @@ function frame(now: number) {
       const camera = pvpGame.getCamera();
       game.renderer.render(game.scene, camera);
       
-      // Simple HUD
+      // Use real HUD with crosshair
+      const hudState = {
+        score: 0,
+        combo: 0,
+        wave: 0,
+        enemiesLeft: 0,
+        intermission: 0,
+        hp: pvpGame.myHp,
+        hpMax: pvpGame.myMaxHp,
+        ammo: pvpGame.weapons ? pvpGame.weapons.hudAmmo : { inMag: 0, reserve: 0 },
+        current: pvpGame.weapons ? pvpGame.weapons.current : 'rifle' as any,
+        ammoAll: pvpGame.weapons ? {
+          rifle: pvpGame.weapons.ammoFor('rifle'),
+          pistol: pvpGame.weapons.ammoFor('pistol'),
+          shotgun: pvpGame.weapons.ammoFor('shotgun'),
+          sniper: pvpGame.weapons.ammoFor('sniper'),
+          katana: pvpGame.weapons.ammoFor('katana'),
+        } : {} as any,
+        reloading: pvpGame.weapons ? pvpGame.weapons.reloading : false,
+        hint: '',
+        banner: null,
+        killFeed: [],
+        hurt: 0,
+        hurtDirAngle: 0,
+        blocking: false,
+        stamina: pvpGame.weapons ? pvpGame.weapons.stamina : 100,
+        ads: pvpGame.weapons ? pvpGame.weapons.isADS : false,
+        boss: null,
+        gameOver: false,
+        victory: false,
+        katanaPhase: 'idle',
+        reticleSpread: 'idle' as any,
+      };
+      game.hud.draw(hudState);
+      
+      // Additional PvP info overlay
       const ctx = hudCanvas.getContext('2d')!;
-      ctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
       ctx.font = '24px "Comic Sans MS"';
       ctx.fillStyle = '#29277f';
-      ctx.fillText(`红队: ${pvpGame.redScore}  蓝队: ${pvpGame.blueScore}`, 30, 50);
-      
-      ctx.fillText(`HP: ${Math.ceil(pvpGame.myHp)}  击杀: ${pvpGame.kills}`, 30, 90);
-      ctx.fillText(`队伍: ${pvpGame.myTeam === 'red' ? '红队' : '蓝队'}`, 30, 130);
+      ctx.fillText(`红队: ${pvpGame.redScore}  蓝队: ${pvpGame.blueScore}`, 30, hudCanvas.height - 120);
+      ctx.fillText(`击杀: ${pvpGame.kills}  死亡: ${pvpGame.deaths}`, 30, hudCanvas.height - 90);
       
       if (!pvpGame.myAlive && pvpGame.respawnTimer > 0) {
         ctx.font = '48px "Comic Sans MS"';

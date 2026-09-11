@@ -162,6 +162,26 @@ export class GameRoom {
         }
         break;
 
+      case 'shoot':
+        // Forward shoot to host for hit detection
+        if (playerId !== this.hostId && this.hostId) {
+          const host = this.players.get(this.hostId);
+          if (host?.ws) {
+            this.send(host.ws, { type: 'clientShoot', playerId, ...msg });
+          }
+        } else if (playerId === this.hostId) {
+          // Host shooting - broadcast to others for visual feedback
+          this.broadcast(msg, playerId);
+        }
+        break;
+
+      case 'kill':
+        // Host reporting a kill - broadcast to all
+        if (playerId === this.hostId) {
+          this.broadcast(msg);
+        }
+        break;
+
       case 'event':
         // Host sending event (death, etc)
         if (playerId === this.hostId) {
