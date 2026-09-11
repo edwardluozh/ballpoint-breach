@@ -16,6 +16,21 @@ npm test           # vitest(导航连通性/武器规格/NPC 尺寸/池上限/�
 npm run build      # typecheck + vite build
 ```
 
+## 游戏模式
+
+### 单人波次模式
+5 波敌人(Grunt/Rusher/Heavy/Marksman),第 5 波 THE DOODLER 登场;波清恢复 HP 与弹药。
+
+### 🎮 对战模式 (PvP) **NEW!**
+- **CS风格房间系统**: 创建房间(6位码) / 加入房间
+- **红蓝团队对抗**: 团队选择 → 分队出生 → 团队死斗
+- **2-8玩家**: 本地测试或联机对战
+- **主机权威**: PeerJS P2P连接,主机验证射击
+- **完整同步**: 移动/射击/伤害/死亡/重生(5秒)
+- **团队识别**: 红/蓝色轮廓区分友军和敌人
+
+详细架构见 [`MULTIPLAYER.md`](MULTIPLAYER.md)
+
 ## 操作
 
 | 键 | 功能 |
@@ -27,8 +42,6 @@ npm run build      # typecheck + vite build
 | Q | 抓钩(拉敌人 / 拉自己到赭色锚点) |
 | 1–5 | 步枪 / 霰弹 / 左轮 / 狙击 / 武士刀 |
 | R | 装填 / 结束后重开;Esc 暂停 |
-
-5 波敌人(Grunt/Rusher/Heavy/Marksman),第 5 波 THE DOODLER 登场;波清恢复 HP 与弹药。
 
 ## QA 参数(不影响正常玩法)
 
