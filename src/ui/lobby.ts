@@ -1,4 +1,4 @@
-import type { Team } from '../net/network';
+import type { Team } from '../net/ws-client';
 
 export interface LobbyPlayer {
   id: string;

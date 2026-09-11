@@ -4,8 +4,8 @@ import { Game } from './game';
 import { Input } from './core/input';
 import { MainMenu } from './ui/menu';
 import { LobbyUI, type LobbyPlayer } from './ui/lobby';
-import { NetworkManager } from './net/network';
-import { PvPGame } from './pvp/PvPGame';
+import { MultiplayerClient } from './net/ws-client';
+import { PvPGameWS } from './pvp/PvPGameWS';
 
 /* ---------- QA 参数 ---------- */
 function qaParams() {
@@ -38,14 +38,14 @@ const pauseScreen = document.getElementById('pause-screen')!;
 const input = new Input(sceneCanvas);
 const qa = qaParams();
 let game: Game | null = null;
-let pvpGame: PvPGame | null = null;
+let pvpGame: PvPGameWS | null = null;
 let running = false;
 let paused = false;
 let lastT = performance.now();
 let mode: 'solo' | 'pvp' = 'solo';
 
 // 网络和大厅
-let net: NetworkManager | null = null;
+let net: MultiplayerClient | null = null;
 let lobby: LobbyUI | null = null;
 let lobbyPlayers = new Map<string, LobbyPlayer>();
 
@@ -65,17 +65,17 @@ function initMenu() {
       } else if (action === 'createRoom') {
         mode = 'pvp';
         menu!.showStatus('正在创建房间...');
-        net = new NetworkManager();
+        net = new MultiplayerClient();
         const code = await net.createRoom('Player');
         menu!.hide();
-        showLobby(code, true);
+        showLobby(code, net.isHost);
       } else if (action === 'joinRoom') {
         mode = 'pvp';
         menu!.showStatus('正在加入房间...');
-        net = new NetworkManager();
+        net = new MultiplayerClient();
         await net.joinRoom(data!, 'Player');
         menu!.hide();
-        showLobby(data!, false);
+        showLobby(data!, net.isHost);
       }
     } catch (err) {
       showError('网络错误: ' + err);
@@ -105,38 +105,14 @@ async function enterSoloGame() {
   lastT = performance.now();
 }
 
-function showLobby(code: string, isHost: boolean) {
-  lobby = new LobbyUI(code, isHost, net!.myId);
-  
-  // 初始化本地玩家
-  lobbyPlayers.set(net!.myId, {
-    id: net!.myId,
-    name: 'Player',
-    team: 'spectator',
-    ready: false,
-  });
-  
-  // 如果是主机,添加自己到远程连接用于测试
-  if (isHost) {
-    net!.onMessage = (msg) => handleLobbyMessage(msg);
-  } else {
-    // 客户端:发送ready
-    net!.send({ type: 'ready', id: net!.myId, name: 'Player' });
-    net!.onMessage = (msg) => handleLobbyMessage(msg);
-  }
-  
-  lobby.updateRoster(lobbyPlayers);
+function setupLobbyActions() {
+  if (!lobby) return;
   
   lobby.onLobbyAction((action, data) => {
     if (action === 'team') {
-      const myPlayer = lobbyPlayers.get(net!.myId)!;
-      myPlayer.team = data!;
-      lobbyPlayers.set(net!.myId, myPlayer);
-      lobby!.updateRoster(lobbyPlayers);
-      
-      // 通知其他玩家
-      net!.send({ type: 'team', id: net!.myId, name: 'Player', team: data });
-    } else if (action === 'start' && isHost) {
+      // 通知服务器队伍变更
+      net!.send({ type: 'team', team: data });
+    } else if (action === 'start' && net!.isHost) {
       // 检查队伍
       const teams = Array.from(lobbyPlayers.values()).map(p => p.team);
       const hasRed = teams.includes('red');
@@ -146,8 +122,8 @@ function showLobby(code: string, isHost: boolean) {
         return;
       }
       
-      // 开始对战
-      startPvPMatch();
+      // 通知服务器开始对战
+      net!.send({ type: 'start' });
     } else if (action === 'leave') {
       // 返回菜单
       lobby!.destroy();
@@ -164,32 +140,22 @@ function showLobby(code: string, isHost: boolean) {
   });
 }
 
+function showLobby(code: string, isHost: boolean) {
+  lobby = new LobbyUI(code, isHost, net!.myId);
+  
+  // 设置消息处理
+  net!.onMessage = (msg) => handleLobbyMessage(msg);
+  
+  // 等待服务器的roster消息
+  lobby.updateRoster(lobbyPlayers);
+  
+  setupLobbyActions();
+}
+
 function handleLobbyMessage(msg: any) {
-  if (msg.type === 'ready' && net!.isHost) {
-    // 新玩家连接
-    lobbyPlayers.set(msg.id, {
-      id: msg.id,
-      name: msg.name,
-      team: 'spectator',
-      ready: true,
-    });
-    if (lobby) {
-      lobby.updateRoster(lobbyPlayers);
-    }
-    
-    // 发送完整roster给新加入的guest
-    const rosterData = Array.from(lobbyPlayers.values()).map(p => ({
-      id: p.id,
-      name: p.name,
-      team: p.team,
-      ready: p.ready,
-    }));
-    net!.send({ type: 'roster', players: rosterData }, msg.id);
-    
-    // 转发给其他客户端(让其他人知道有新玩家)
-    net!.send(msg);
-  } else if (msg.type === 'roster') {
-    // 完整名单同步(guest接收)
+  if (msg.type === 'roster') {
+    // 服务器发送的完整名单
+    lobbyPlayers.clear();
     const players = msg.players as Array<{ id: string; name: string; team: any; ready: boolean }>;
     for (const p of players) {
       lobbyPlayers.set(p.id, p);
@@ -197,26 +163,22 @@ function handleLobbyMessage(msg: any) {
     if (lobby) {
       lobby.updateRoster(lobbyPlayers);
     }
-  } else if (msg.type === 'team') {
-    // 队伍变更 - upsert机制,自动添加不存在的玩家
-    if (!lobbyPlayers.has(msg.id)) {
-      lobbyPlayers.set(msg.id, {
-        id: msg.id,
-        name: msg.name || 'Player',
-        team: msg.team,
-        ready: true,
-      });
-    } else {
-      const p = lobbyPlayers.get(msg.id)!;
-      p.team = msg.team;
-      lobbyPlayers.set(msg.id, p);
-    }
-    if (lobby) {
-      lobby.updateRoster(lobbyPlayers);
-    }
   } else if (msg.type === 'start') {
     // 对战开始
     startPvPMatch();
+  } else if (msg.type === 'promoted') {
+    // 被提升为host
+    if (lobby) {
+      lobby.destroy();
+      lobby = new LobbyUI(net!.roomCode, true, net!.myId);
+      lobby.updateRoster(lobbyPlayers);
+      // 重新绑定lobby actions
+      setupLobbyActions();
+    }
+  } else if (msg.type === 'error') {
+    if (lobby) {
+      lobby.showStatus(msg.message || '错误');
+    }
   }
 }
 
@@ -233,20 +195,11 @@ function startPvPMatch() {
   
   // 创建PvP游戏实例
   const myTeam = lobbyPlayers.get(net!.myId)!.team;
-  pvpGame = new PvPGame(
-    net!,
-    'Player',
-    game.scene,
-    game.arena,
-    game.arena.colliders,
-    game.audio,
-    input,
-  );
-  pvpGame.myTeam = myTeam;
+  pvpGame = new PvPGameWS(net!, game, myTeam as 'red' | 'blue' | 'spectator');
   
   // 初始化远程玩家(从lobby名单)
   for (const [id, player] of lobbyPlayers) {
-    if (id !== net!.myId) {
+    if (id !== net!.myId && (player.team === 'red' || player.team === 'blue')) {
       pvpGame.addRemotePlayer(id, player.name, player.team);
     }
   }
@@ -258,9 +211,7 @@ function startPvPMatch() {
   lastT = performance.now();
   
   // 开始对战
-  if (net!.isHost) {
-    pvpGame.startMatch();
-  }
+  pvpGame.startMatch();
   
   // 锁定指针
   (async () => {
@@ -329,42 +280,24 @@ function frame(now: number) {
     if (mode === 'solo' && game) {
       game.update(dt);
     } else if (mode === 'pvp' && pvpGame && game) {
-      // 更新yaw/pitch从input
-      pvpGame.yaw += input.state.look.dx;
-      pvpGame.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pvpGame.pitch + input.state.look.dy));
+      // PvP uses PlayerController - just update and render
+      pvpGame.update(dt);
       
-      // 处理射击
-      if (input.state.firePressed && pvpGame.alive) {
-        const origin = pvpGame.pos.clone();
-        origin.y += 1.6;
-        const dir = new THREE.Vector3(0, 0, -1);
-        dir.applyAxisAngle(new THREE.Vector3(1, 0, 0), pvpGame.pitch);
-        dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), pvpGame.yaw);
-        pvpGame.shoot(origin, dir);
-      }
+      // Use camera from PlayerController
+      const camera = pvpGame.getCamera();
+      game.renderer.render(game.scene, camera);
       
-      // PvP模式:更新PvP逻辑 + 渲染arena
-      pvpGame.update(dt, game.camera);
-      
-      // 简化渲染:只更新camera位置
-      game.camera.position.copy(pvpGame.pos);
-      game.camera.position.y += 1.6;
-      game.camera.rotation.order = 'YXZ';
-      game.camera.rotation.y = pvpGame.yaw;
-      game.camera.rotation.x = pvpGame.pitch;
-      
-      // 渲染场景
-      game.renderer.render(game.scene, game.camera);
-      
-      // 简化HUD:只显示分数
+      // Simple HUD
       const ctx = hudCanvas.getContext('2d')!;
       ctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
       ctx.font = '24px "Comic Sans MS"';
       ctx.fillStyle = '#29277f';
       ctx.fillText(`红队: ${pvpGame.redScore}  蓝队: ${pvpGame.blueScore}`, 30, 50);
-      ctx.fillText(`HP: ${Math.ceil(pvpGame.hp)}  击杀: ${pvpGame.kills}`, 30, 90);
+      
+      ctx.fillText(`HP: ${Math.ceil(pvpGame.myHp)}  击杀: ${pvpGame.kills}`, 30, 90);
       ctx.fillText(`队伍: ${pvpGame.myTeam === 'red' ? '红队' : '蓝队'}`, 30, 130);
-      if (!pvpGame.alive) {
+      
+      if (!pvpGame.myAlive && pvpGame.respawnTimer > 0) {
         ctx.font = '48px "Comic Sans MS"';
         ctx.fillStyle = '#d7304a';
         ctx.textAlign = 'center';

@@ -25,11 +25,13 @@ npm run build      # typecheck + vite build
 - **CS风格房间系统**: 创建房间(6位码) / 加入房间
 - **红蓝团队对抗**: 团队选择 → 分队出生 → 团队死斗
 - **2-8玩家**: 本地测试或联机对战
-- **主机权威**: PeerJS P2P连接,主机验证射击
-- **完整同步**: 移动/射击/伤害/死亡/重生(5秒)
+- **架构**: Cloudflare Worker + Durable Object WebSocket房间服务器
+- **主机权威**: 主机运行游戏逻辑,客户端发送输入
+- **PlayerController**: 复用单人模式移动手感,无重复实现
+- **完整同步**: 移动/射击/伤害/死亡/重生
 - **团队识别**: 红/蓝色轮廓区分友军和敌人
 
-详细架构见 [`MULTIPLAYER.md`](MULTIPLAYER.md)
+详细架构/部署见 [`MULTIPLAYER.md`](MULTIPLAYER.md)
 
 ## 操作
 
