@@ -228,16 +228,21 @@ export class Npc {
     }
     
     // 长时间无进展检测(15秒未移动显著距离)
+    // 但排除战斗/有LOS状态(玩家在附近时NPC停留是正常行为)
     const progressDist = this.pos.distanceTo(this.lastProgressPos);
     if (progressDist > 3) {
       this.lastProgressPos.copy(this.pos);
       this.idleTimer = 0;
-    } else {
+    } else if (this.state !== 'combat' && !this.losCache) {
+      // 只在非战斗且无视线时累计idle时间
       this.idleTimer += dt;
       if (this.idleTimer > 15) {
         this.teleportToValid(ctx);
         this.idleTimer = 0;
       }
+    } else {
+      // 战斗中或有LOS时重置计时器
+      this.idleTimer = 0;
     }
   }
 
